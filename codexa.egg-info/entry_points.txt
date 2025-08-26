@@ -1,0 +1,2 @@
+[console_scripts]
+codexa = codexa.cli:main
