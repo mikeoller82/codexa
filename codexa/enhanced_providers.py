@@ -168,6 +168,12 @@ class EnhancedAIProvider(AIProvider):
         """Get available models for this provider."""
         return [model.name for model in self.config.models if model.enabled]
 
+    def get_available_models(self) -> List[Dict[str, str]]:
+        """Get available models from the provider's API (implements abstract method)."""
+        if hasattr(self.base_provider, 'get_available_models'):
+            return self.base_provider.get_available_models()
+        return []
+
     def get_available_models_from_api(self) -> List[Dict[str, str]]:
         """Get available models from the provider's API."""
         if hasattr(self.base_provider, 'get_available_models'):

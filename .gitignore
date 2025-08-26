@@ -41,3 +41,6 @@ instruments/**
 !**/.gitkeep
 agent_history.gif
 node_modules
+
+# Codexa working directory
+.codexa/
