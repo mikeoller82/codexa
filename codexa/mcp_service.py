@@ -252,30 +252,35 @@ class MCPService:
         }
     
     def enable_server(self, server_name: str) -> bool:
-        """Enable an MCP server."""
-        if server_name in self.connection_manager.server_configs:
-            config = self.connection_manager.server_configs[server_name]
-            config.enabled = True
+        """Enable an MCP server with validation."""
+        try:
+            # Use the enhanced config validation
+            success = self.config.enable_mcp_server(server_name)
             
-            # Update configuration
-            self.config.user_config.setdefault("mcp_servers", {})[server_name]["enabled"] = True
+            if success and server_name in self.connection_manager.server_configs:
+                config = self.connection_manager.server_configs[server_name]
+                config.enabled = True
+                
+                # Restart connection if service is running
+                if self.is_running:
+                    asyncio.create_task(self.connection_manager.connect_server(server_name))
+                
+                self.logger.info(f"Enabled MCP server: {server_name}")
+                return True
+                
+        except ValueError as e:
+            self.logger.error(f"Failed to enable MCP server {server_name}: {e}")
+            return False
             
-            # Restart connection if service is running
-            if self.is_running:
-                asyncio.create_task(self.connection_manager.connect_server(server_name))
-            
-            self.logger.info(f"Enabled MCP server: {server_name}")
-            return True
         return False
     
     def disable_server(self, server_name: str) -> bool:
         """Disable an MCP server."""
-        if server_name in self.connection_manager.server_configs:
+        success = self.config.disable_mcp_server(server_name)
+        
+        if success and server_name in self.connection_manager.server_configs:
             config = self.connection_manager.server_configs[server_name]
             config.enabled = False
-            
-            # Update configuration
-            self.config.user_config.setdefault("mcp_servers", {})[server_name]["enabled"] = False
             
             # Disconnect if service is running
             if self.is_running:
@@ -283,7 +288,7 @@ class MCPService:
             
             self.logger.info(f"Disabled MCP server: {server_name}")
             return True
-        return False
+        return success
     
     def add_custom_server(self, name: str, command: List[str], 
                          capabilities: Optional[List[str]] = None,

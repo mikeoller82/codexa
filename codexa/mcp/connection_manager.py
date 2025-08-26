@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Optional, Any, Callable
 from pathlib import Path
 from datetime import datetime, timedelta
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from .protocol import MCPProtocol, MCPMessage, MCPError
@@ -29,14 +29,14 @@ class MCPServerConfig:
     """MCP server configuration."""
     name: str
     command: List[str]
-    args: List[str] = None
-    env: Dict[str, str] = None
+    args: List[str] = field(default_factory=list)
+    env: Dict[str, str] = field(default_factory=dict)
     timeout: int = 30
     max_retries: int = 3
     retry_delay: int = 5
     enabled: bool = True
     priority: int = 1  # Higher priority = preferred server
-    capabilities: List[str] = None  # Expected capabilities
+    capabilities: List[str] = field(default_factory=list)  # Expected capabilities
 
 
 @dataclass

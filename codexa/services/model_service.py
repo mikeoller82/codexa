@@ -13,6 +13,7 @@ from ..ui.provider_selector import ModelInfo, ProviderInfo
 from ..providers import ProviderFactory
 from ..enhanced_providers import EnhancedProviderFactory
 from ..config import Config
+from ..enhanced_config import EnhancedConfig
 
 
 logger = logging.getLogger(__name__)
@@ -31,11 +32,14 @@ class ModelDiscoveryResult:
 class ModelService:
     """Service for discovering and managing available models."""
     
-    def __init__(self, config: Config):
+    def __init__(self, config):
         self.config = config
         self.cache = {}
         self.cache_ttl = 300  # 5 minutes
         self.last_discovery = {}
+        
+        # Determine if using enhanced config
+        self.is_enhanced = isinstance(config, EnhancedConfig)
         
     def discover_all_models(self, timeout: float = 30.0) -> Dict[str, ModelDiscoveryResult]:
         """Discover available models from all providers concurrently."""
@@ -212,33 +216,45 @@ class ModelService:
         """Get list of available provider names."""
         providers = []
         
-        # Check basic providers
-        try:
-            factory = ProviderFactory()
-            if self.config.get_api_key("openai"):
-                providers.append("openai")
-            if self.config.get_api_key("anthropic"):
-                providers.append("anthropic")
-            if self.config.get_api_key("openrouter"):
-                providers.append("openrouter")
-        except Exception as e:
-            logger.debug(f"Error checking basic providers: {e}")
+        if self.is_enhanced:
+            # Use enhanced config
+            providers = self.config.get_available_providers()
+            logger.debug(f"Using enhanced config, found providers: {providers}")
+        else:
+            # Check basic providers
+            try:
+                factory = ProviderFactory()
+                if self.config.get_api_key("openai"):
+                    providers.append("openai")
+                if self.config.get_api_key("anthropic"):
+                    providers.append("anthropic")
+                if self.config.get_api_key("openrouter"):
+                    providers.append("openrouter")
+            except Exception as e:
+                logger.debug(f"Error checking basic providers: {e}")
         
         return providers
     
     def _get_provider_instance(self, provider_name: str):
         """Get provider instance."""
         try:
-            factory = ProviderFactory()
-            # Temporarily set the provider to get instance
-            original_provider = self.config.get_provider()
-            
-            # Create config with specific provider
-            temp_config = Config()
-            temp_config.default_provider = provider_name
-            
-            provider = factory.create_provider(temp_config)
-            return provider
+            if self.is_enhanced:
+                # Use enhanced provider factory
+                factory = EnhancedProviderFactory(self.config)
+                provider = factory.get_provider(provider_name)
+                return provider
+            else:
+                # Use basic provider factory
+                factory = ProviderFactory()
+                # Temporarily set the provider to get instance
+                original_provider = self.config.get_provider()
+                
+                # Create config with specific provider
+                temp_config = Config()
+                temp_config.default_provider = provider_name
+                
+                provider = factory.create_provider(temp_config)
+                return provider
             
         except Exception as e:
             logger.error(f"Error creating provider instance for {provider_name}: {e}")

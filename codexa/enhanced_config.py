@@ -415,6 +415,113 @@ class EnhancedConfig:
             "config_file_exists": (Path.home() / ".codexarc").exists()
         }
     
+    def validate_mcp_server_config(self, server_name: str, config: Dict[str, Any]) -> bool:
+        """Validate MCP server configuration."""
+        required_fields = ["command"]
+        optional_fields = ["args", "env", "enabled", "timeout", "priority", "capabilities"]
+        
+        # Check required fields
+        for field in required_fields:
+            if field not in config:
+                raise ValueError(f"MCP server '{server_name}' missing required field: {field}")
+        
+        # Validate command is a list
+        if not isinstance(config["command"], list):
+            raise ValueError(f"MCP server '{server_name}' command must be a list")
+        
+        # Set defaults for optional fields
+        config.setdefault("args", [])
+        config.setdefault("env", {})
+        config.setdefault("enabled", False)
+        config.setdefault("timeout", 30)
+        config.setdefault("priority", 1)
+        config.setdefault("capabilities", [])
+        
+        # Validate types
+        if not isinstance(config["args"], list):
+            raise ValueError(f"MCP server '{server_name}' args must be a list")
+        if not isinstance(config["env"], dict):
+            raise ValueError(f"MCP server '{server_name}' env must be a dict")
+        if not isinstance(config["enabled"], bool):
+            raise ValueError(f"MCP server '{server_name}' enabled must be a boolean")
+        if not isinstance(config["timeout"], int) or config["timeout"] <= 0:
+            raise ValueError(f"MCP server '{server_name}' timeout must be a positive integer")
+        if not isinstance(config["priority"], int):
+            raise ValueError(f"MCP server '{server_name}' priority must be an integer")
+        if not isinstance(config["capabilities"], list):
+            raise ValueError(f"MCP server '{server_name}' capabilities must be a list")
+        
+        return True
+    
+    def enable_mcp_server(self, server_name: str) -> bool:
+        """Enable an MCP server with validation."""
+        if "mcp_servers" not in self.user_config:
+            self.user_config["mcp_servers"] = {}
+        
+        # Check if server exists in config
+        if server_name not in self.user_config["mcp_servers"]:
+            # Add default configuration from built-in servers
+            if server_name in self.mcp_servers:
+                default_config = {
+                    "command": self.mcp_servers[server_name].command,
+                    "args": self.mcp_servers[server_name].args,
+                    "env": self.mcp_servers[server_name].env,
+                    "enabled": True,
+                    "timeout": self.mcp_servers[server_name].timeout,
+                    "priority": self.mcp_servers[server_name].priority,
+                    "capabilities": self.mcp_servers[server_name].capabilities
+                }
+                self.user_config["mcp_servers"][server_name] = default_config
+            else:
+                raise ValueError(f"Unknown MCP server: {server_name}")
+        
+        # Validate configuration
+        try:
+            self.validate_mcp_server_config(server_name, self.user_config["mcp_servers"][server_name])
+        except ValueError as e:
+            raise ValueError(f"Invalid MCP server configuration: {e}")
+        
+        # Enable the server
+        self.user_config["mcp_servers"][server_name]["enabled"] = True
+        
+        # Update runtime configuration
+        if server_name in self.mcp_servers:
+            self.mcp_servers[server_name].enabled = True
+        
+        return True
+    
+    def disable_mcp_server(self, server_name: str) -> bool:
+        """Disable an MCP server."""
+        if "mcp_servers" not in self.user_config:
+            return False
+        
+        if server_name not in self.user_config["mcp_servers"]:
+            return False
+        
+        # Disable the server
+        self.user_config["mcp_servers"][server_name]["enabled"] = False
+        
+        # Update runtime configuration
+        if server_name in self.mcp_servers:
+            self.mcp_servers[server_name].enabled = False
+        
+        return True
+    
+    def get_mcp_server_status(self) -> Dict[str, Any]:
+        """Get status of all MCP servers."""
+        status = {}
+        for name, server in self.mcp_servers.items():
+            user_config = self.user_config.get("mcp_servers", {}).get(name, {})
+            status[name] = {
+                "enabled": server.enabled,
+                "configured": name in self.user_config.get("mcp_servers", {}),
+                "command": server.command,
+                "capabilities": server.capabilities,
+                "priority": server.priority,
+                "timeout": server.timeout
+            }
+        return status
+
     def save_config(self):
         """Save current configuration to file."""
         config_path = Path.home() / ".codexarc"
