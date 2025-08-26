@@ -2,7 +2,7 @@
 Advanced user guidance system with interactive help and contextual assistance.
 """
 
-from typing import Dict, List, Optional, Any, Callable, Tuple
+from typing import Dict, List, Optional, Any, Callable, Tuple, Union
 from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
@@ -83,11 +83,21 @@ class UserGuidanceSystem:
         self,
         topic: str,
         guidance_type: GuidanceType = GuidanceType.CONTEXTUAL,
-        context: Optional[GuidanceContext] = None
+        context: Optional[Union[GuidanceContext, Dict[str, Any]]] = None
     ) -> bool:
         """Provide contextual guidance to the user."""
         if context:
-            self.user_context = context
+            if isinstance(context, dict):
+                # If a dict is passed, update the existing GuidanceContext
+                # instead of replacing it
+                if hasattr(self.user_context, 'session_state'):
+                    self.user_context.session_state.update(context)
+                else:
+                    # Fallback: create a new GuidanceContext with the dict data
+                    self.user_context = GuidanceContext()
+                    self.user_context.session_state = context
+            else:
+                self.user_context = context
         
         # Record interaction
         self._record_interaction(topic, guidance_type)
