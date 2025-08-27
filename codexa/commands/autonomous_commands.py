@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 
-from .command_registry import Command, CommandRegistry
+from .command_registry import Command, CommandRegistry, CommandCategory
 from ..autonomous_agent import PermissionMode
 
 console = Console()
@@ -19,19 +19,35 @@ class AutonomousCommands:
     @staticmethod
     def register_all(registry: CommandRegistry):
         """Register all autonomous mode commands."""
-        registry.register_command(Command(
-            name="/autonomous",
-            description="Configure autonomous mode settings",
-            handler=AutonomousCommands.handle_autonomous,
-            usage="/autonomous [status|enable|disable|permission <mode>]",
-            examples=[
-                "/autonomous status - Show current autonomous mode status",
-                "/autonomous enable - Enable autonomous mode",
-                "/autonomous disable - Disable autonomous mode", 
-                "/autonomous permission session - Set session-wide permissions",
-                "/autonomous permission ask - Ask before each action"
-            ]
-        ))
+        # Create a custom command class for autonomous functionality
+        class AutonomousCommand(Command):
+            def __init__(self):
+                super().__init__()
+                self.name = "autonomous"
+                self.description = "Configure autonomous mode settings"
+                self.category = CommandCategory.CORE
+                self.aliases = ["auto"]
+            
+            async def execute(self, context):
+                # Parse arguments from user input
+                args = context.parsed_args.get('args', [])
+                if not args and context.user_input.strip():
+                    # Parse from raw input if needed
+                    parts = context.user_input.strip().split()[1:]  # Skip command name
+                    args = parts
+                
+                # Call the handler
+                result = await AutonomousCommands.handle_autonomous(
+                    args, 
+                    codexa_agent=context.codexa_agent
+                )
+                
+                if result.get("success"):
+                    return result.get("message", "Command executed successfully")
+                else:
+                    return f"Error: {result.get('error', 'Unknown error')}"
+        
+        registry.register(AutonomousCommand())
     
     @staticmethod
     async def handle_autonomous(args: List[str], **kwargs) -> Dict[str, any]:
