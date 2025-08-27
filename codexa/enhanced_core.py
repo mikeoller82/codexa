@@ -352,7 +352,8 @@ class EnhancedCodexaAgent:
                 if self.autonomous_agent and self._should_use_autonomous_mode(request):
                     try:
                         console.print(f"\n[bold cyan]🤖 Switching to Autonomous Mode[/bold cyan]")
-                        autonomous_response = await self.autonomous_agent.process_request_autonomously(request, context)
+                        # Process with streaming enabled
+                        autonomous_response = await self.autonomous_agent.process_request_autonomously_streaming(request, context)
                         if autonomous_response:
                             console.print("\n[bold green]Codexa (Autonomous):[/bold green]")
                             console.print(Markdown(autonomous_response))
@@ -375,6 +376,15 @@ class EnhancedCodexaAgent:
                 if enhanced_response:
                     console.print("\n[bold green]Codexa:[/bold green]")
                     console.print(Markdown(enhanced_response))
+                    
+                    # Save to history
+                    from datetime import datetime
+                    self.history.append({
+                        "user": request,
+                        "assistant": enhanced_response,
+                        "timestamp": datetime.now().isoformat(),
+                        "mode": "mcp_enhanced"
+                    })
                     return
                 
                 # Try planning workflow first

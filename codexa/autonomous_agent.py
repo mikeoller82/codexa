@@ -129,6 +129,85 @@ class AutonomousAgent:
             self.logger.error(f"Autonomous processing failed: {e}")
             return f"Autonomous processing encountered an error: {e}. I can still provide guidance manually."
     
+    async def process_request_autonomously_streaming(self, request: str, context: str = "") -> str:
+        """
+        Process a user request autonomously with real-time streaming of thought process.
+        
+        This version displays the reasoning process and thought process in real-time.
+        """
+        import time
+        import sys
+        
+        self.console.print(f"\n[bold blue]🔍 Processing request autonomously...[/bold blue]")
+        self.console.print(f"[dim]Request: {request}[/dim]")
+        
+        try:
+            # Step 1: Analyze request to determine scope and intent
+            self.console.print(f"\n[bold yellow]🧠 Analyzing request...[/bold yellow]")
+            sys.stdout.flush()  # Force immediate display
+            time.sleep(0.1)  # Brief pause for visibility
+            
+            request_analysis = await self._analyze_request(request)
+            
+            self.console.print(f"\n[bold green]📋 Request Analysis:[/bold green]")
+            self.console.print(f"• Intent: {request_analysis['intent']}")
+            self.console.print(f"• Scope: {request_analysis['scope']}")
+            self.console.print(f"• Priority: {request_analysis['priority']}")
+            sys.stdout.flush()
+            time.sleep(0.2)
+            
+            # Step 2: Discover relevant files proactively
+            self.console.print(f"\n[bold yellow]📁 Discovering relevant files...[/bold yellow]")
+            sys.stdout.flush()
+            time.sleep(0.1)
+            
+            discovered_files = await self._discover_relevant_files(request, request_analysis)
+            if discovered_files:
+                await self._display_discovered_files(discovered_files)
+                sys.stdout.flush()
+                time.sleep(0.2)
+            
+            # Step 3: Analyze discovered code
+            self.console.print(f"\n[bold yellow]🔍 Analyzing discovered code...[/bold yellow]")
+            sys.stdout.flush()
+            time.sleep(0.1)
+            
+            code_analysis = await self._analyze_discovered_code(discovered_files, request)
+            if code_analysis:
+                await self._display_code_analysis(code_analysis)
+                sys.stdout.flush()
+                time.sleep(0.2)
+            
+            # Step 4: Plan autonomous actions
+            self.console.print(f"\n[bold yellow]🎯 Planning actions...[/bold yellow]")
+            sys.stdout.flush()
+            time.sleep(0.1)
+            
+            planned_actions = await self._plan_autonomous_actions(request, discovered_files, code_analysis)
+            if planned_actions:
+                await self._display_planned_actions(planned_actions)
+                sys.stdout.flush()
+                time.sleep(0.2)
+            
+            # Step 5: Get permission and execute actions
+            if planned_actions:
+                permission_granted = await self._get_permission_for_actions(planned_actions)
+                if permission_granted:
+                    self.console.print(f"\n[bold yellow]⚡ Executing actions...[/bold yellow]")
+                    sys.stdout.flush()
+                    time.sleep(0.1)
+                    
+                    results = await self._execute_autonomous_actions_with_real_files(planned_actions)
+                    return await self._format_execution_results(results)
+                else:
+                    return "Actions cancelled by user. I can provide guidance instead if you'd like."
+            else:
+                return "No autonomous actions needed. I can provide guidance or answer questions about the code."
+                
+        except Exception as e:
+            self.logger.error(f"Autonomous processing failed: {e}")
+            return f"Autonomous processing encountered an error: {e}. I can still provide guidance manually."
+    
     async def _analyze_request(self, request: str) -> Dict[str, str]:
         """Analyze the user request to determine intent, scope, and priority."""
         # Simple heuristic analysis - in real implementation this could use AI
@@ -397,11 +476,15 @@ class AutonomousAgent:
                 ))
         
         elif "create" in request_lower or "add" in request_lower:
-            # Plan creation actions
+            # Plan creation actions based on request analysis
+            file_extension = self._determine_file_extension(request, files)
+            base_name = self._extract_filename_from_request(request) or "new_file"
+            new_file_path = f"{base_name}{file_extension}"
+            
             actions.append(AutonomousAction(
                 action_type="create",
-                file_path="new_file.py",  # This would be determined more intelligently
-                description="Create new file based on request",
+                file_path=new_file_path,
+                description=f"Create {file_extension[1:]} file based on request",
                 estimated_impact="low"
             ))
         
@@ -482,6 +565,49 @@ class AutonomousAgent:
         
         return results
     
+    async def _execute_autonomous_actions_with_real_files(self, actions: List[AutonomousAction]) -> List[Dict[str, Any]]:
+        """Execute autonomous actions with actual file operations."""
+        import sys
+        import time
+        results = []
+        
+        self.console.print(f"\n[bold green]⚡ Executing {len(actions)} actions...[/bold green]")
+        
+        for i, action in enumerate(actions):
+            self.console.print(f"\n[bold blue]Action {i+1}/{len(actions)}:[/bold blue] {action.action_type} {action.file_path}")
+            sys.stdout.flush()
+            time.sleep(0.1)
+            
+            try:
+                if action.action_type == "modify":
+                    result = await self._execute_modify_action_real(action)
+                elif action.action_type == "create":
+                    result = await self._execute_create_action_real(action)
+                elif action.action_type == "delete":
+                    result = await self._execute_delete_action_real(action)
+                else:
+                    # Handle comprehensive MCP filesystem actions
+                    result = await self._execute_comprehensive_action(action)
+                
+                results.append(result)
+                
+                if result.get("success"):
+                    self.console.print(f"[green]✅ {action.description}[/green]")
+                else:
+                    self.console.print(f"[red]❌ Failed: {result.get('error', 'Unknown error')}[/red]")
+                
+                sys.stdout.flush()
+                time.sleep(0.1)
+                    
+            except Exception as e:
+                error_result = {"success": False, "error": str(e), "action": action}
+                results.append(error_result)
+                self.console.print(f"[red]❌ Error executing action: {e}[/red]")
+                sys.stdout.flush()
+                time.sleep(0.1)
+        
+        return results
+    
     async def _execute_modify_action(self, action: AutonomousAction) -> Dict[str, Any]:
         """Execute a file modification action."""
         # This is a placeholder - real implementation would do actual modifications
@@ -501,6 +627,139 @@ class AutonomousAgent:
             "file": action.file_path,
             "content": "Simulated file creation"
         }
+    
+    async def _execute_create_action_real(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a real file creation action."""
+        try:
+            file_path = Path(action.file_path)
+            
+            # Generate content based on file type and description
+            content = self._generate_file_content(action.file_path, action.description)
+            
+            # Create directory if it doesn't exist
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Use MCP filesystem if available
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                try:
+                    await self.mcp_filesystem.write_file(action.file_path, content)
+                    self.console.print(f"[dim]Created via MCP: {action.file_path}[/dim]")
+                except Exception as e:
+                    self.logger.warning(f"MCP file creation failed, using local: {e}")
+                    # Fallback to local creation
+                    file_path.write_text(content, encoding='utf-8')
+                    self.console.print(f"[dim]Created locally: {action.file_path}[/dim]")
+            else:
+                # Local file creation
+                file_path.write_text(content, encoding='utf-8')
+                self.console.print(f"[dim]Created locally: {action.file_path}[/dim]")
+            
+            return {
+                "success": True,
+                "action": "create",
+                "file": action.file_path,
+                "content": content[:200] + "..." if len(content) > 200 else content,
+                "size": len(content)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "create", 
+                "file": action.file_path,
+                "error": str(e)
+            }
+    
+    async def _execute_modify_action_real(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a real file modification action."""
+        try:
+            file_path = Path(action.file_path)
+            
+            if not file_path.exists():
+                return {
+                    "success": False,
+                    "action": "modify",
+                    "file": action.file_path,
+                    "error": "File does not exist"
+                }
+            
+            # Read existing content
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                try:
+                    original_content = await self.mcp_filesystem.read_file(action.file_path)
+                except Exception:
+                    original_content = file_path.read_text(encoding='utf-8')
+            else:
+                original_content = file_path.read_text(encoding='utf-8')
+            
+            # Make simple modifications (this could be enhanced with AI)
+            modified_content = self._make_simple_modifications(original_content, action.description)
+            
+            # Write back
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                try:
+                    await self.mcp_filesystem.write_file(action.file_path, modified_content)
+                    self.console.print(f"[dim]Modified via MCP: {action.file_path}[/dim]")
+                except Exception as e:
+                    self.logger.warning(f"MCP file modification failed, using local: {e}")
+                    file_path.write_text(modified_content, encoding='utf-8')
+                    self.console.print(f"[dim]Modified locally: {action.file_path}[/dim]")
+            else:
+                file_path.write_text(modified_content, encoding='utf-8')
+                self.console.print(f"[dim]Modified locally: {action.file_path}[/dim]")
+            
+            return {
+                "success": True,
+                "action": "modify",
+                "file": action.file_path,
+                "changes": "Content updated successfully",
+                "size_change": len(modified_content) - len(original_content)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "modify",
+                "file": action.file_path,
+                "error": str(e)
+            }
+    
+    async def _execute_delete_action_real(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a real file deletion action."""
+        try:
+            file_path = Path(action.file_path)
+            
+            if not file_path.exists():
+                return {
+                    "success": False,
+                    "action": "delete",
+                    "file": action.file_path,
+                    "error": "File does not exist"
+                }
+            
+            # Use MCP filesystem if available
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                try:
+                    await self.mcp_filesystem.delete_file(action.file_path)
+                    self.console.print(f"[dim]Deleted via MCP: {action.file_path}[/dim]")
+                except Exception as e:
+                    self.logger.warning(f"MCP file deletion failed, using local: {e}")
+                    file_path.unlink()
+                    self.console.print(f"[dim]Deleted locally: {action.file_path}[/dim]")
+            else:
+                file_path.unlink()
+                self.console.print(f"[dim]Deleted locally: {action.file_path}[/dim]")
+            
+            return {
+                "success": True,
+                "action": "delete",
+                "file": action.file_path
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "delete",
+                "file": action.file_path,
+                "error": str(e)
+            }
     
     async def _execute_delete_action(self, action: AutonomousAction) -> Dict[str, Any]:
         """Execute a file deletion action."""
@@ -541,3 +800,453 @@ class AutonomousAgent:
             self.session_approved = True
         elif mode == PermissionMode.ASK_EACH_TIME:
             self.session_approved = False
+    
+    def _generate_file_content(self, file_path: str, description: str) -> str:
+        """Generate appropriate file content based on file type and description."""
+        file_path_obj = Path(file_path)
+        extension = file_path_obj.suffix.lower()
+        
+        if extension == '.py':
+            return f'"""\n{description}\n"""\n\n# TODO: Implement {file_path_obj.stem}\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n'
+        elif extension in ['.js', '.ts']:
+            return f'// {description}\n\n// TODO: Implement {file_path_obj.stem}\n\nexport default function {file_path_obj.stem}() {{\n    // Implementation here\n}}\n'
+        elif extension == '.md':
+            return f'# {file_path_obj.stem.replace("_", " ").title()}\n\n{description}\n\n## Overview\n\nTODO: Add documentation\n'
+        elif extension in ['.json']:
+            return '{\n    "name": "' + file_path_obj.stem + '",\n    "description": "' + description + '"\n}'
+        elif extension in ['.yaml', '.yml']:
+            return f'name: {file_path_obj.stem}\ndescription: "{description}"\n'
+        else:
+            return f'# {description}\n\n# TODO: Implement content for {file_path}\n'
+    
+    def _make_simple_modifications(self, content: str, description: str) -> str:
+        """Make simple modifications to file content based on description."""
+        lines = content.split('\n')
+        
+        # Add a comment about the modification
+        modification_comment = f'# Modified: {description}'
+        
+        if 'TODO' in content:
+            # Replace first TODO with actual implementation hint
+            for i, line in enumerate(lines):
+                if 'TODO' in line:
+                    lines[i] = f'{line}\n{modification_comment}'
+                    break
+        else:
+            # Add modification comment at the beginning
+            lines.insert(0, modification_comment)
+        
+        return '\n'.join(lines)
+    
+    def _determine_file_extension(self, request: str, files: List[FileDiscoveryResult]) -> str:
+        """Determine appropriate file extension based on request and existing files."""
+        request_lower = request.lower()
+        
+        # Check for specific language mentions
+        if any(word in request_lower for word in ['python', '.py', 'python script']):
+            return '.py'
+        elif any(word in request_lower for word in ['javascript', 'js', 'node', '.js']):
+            return '.js'
+        elif any(word in request_lower for word in ['typescript', 'ts', '.ts']):
+            return '.ts'
+        elif any(word in request_lower for word in ['react', 'jsx', 'component']):
+            return '.jsx'
+        elif any(word in request_lower for word in ['markdown', 'md', 'documentation', 'readme']):
+            return '.md'
+        elif any(word in request_lower for word in ['json', 'config']):
+            return '.json'
+        elif any(word in request_lower for word in ['yaml', 'yml']):
+            return '.yml'
+        elif any(word in request_lower for word in ['css', 'style']):
+            return '.css'
+        elif any(word in request_lower for word in ['html', 'webpage']):
+            return '.html'
+        
+        # Infer from existing files in project
+        if files:
+            extensions = [Path(f.path).suffix for f in files if Path(f.path).suffix]
+            if extensions:
+                # Return most common extension
+                from collections import Counter
+                most_common = Counter(extensions).most_common(1)
+                return most_common[0][0] if most_common else '.py'
+        
+        # Default to Python
+        return '.py'
+    
+    def _extract_filename_from_request(self, request: str) -> Optional[str]:
+        """Extract filename from request if mentioned."""
+        import re
+        
+        # Look for patterns like "create file.py", "make test.js", etc.
+        filename_pattern = r'(?:create|make|add|build)\s+(?:a\s+)?(\w+(?:\.\w+)?)'
+        match = re.search(filename_pattern, request.lower())
+        if match:
+            return match.group(1)
+        
+        # Look for standalone filenames
+        filename_pattern = r'(\w+\.\w+)'
+        matches = re.findall(filename_pattern, request)
+        if matches:
+            return matches[0].rsplit('.', 1)[0]  # Remove extension
+        
+        # Extract from request context
+        words = request.lower().split()
+        keywords = ['create', 'make', 'add', 'build', 'implement']
+        for i, word in enumerate(words):
+            if word in keywords and i + 1 < len(words):
+                next_word = words[i + 1]
+                if next_word not in ['a', 'an', 'the', 'new']:
+                    # Clean the word to make it a valid filename
+                    clean_name = re.sub(r'[^\w]', '_', next_word)
+                    return clean_name
+        
+        return None
+    
+    def _extract_destination_from_request(self, request: str) -> Optional[str]:
+        """Extract destination path from request."""
+        import re
+        
+        # Look for "to directory" or "into folder" patterns
+        patterns = [
+            r'(?:to|into|in)\s+(?:the\s+)?([\\w/]+)(?:\s+directory|\s+folder|\s+dir)?',
+            r'move.*?(?:to|into)\s+([\\w/]+)',
+            r'put.*?(?:in|into)\s+([\\w/]+)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, request.lower())
+            if match:
+                return match.group(1)
+        
+        return None
+    
+    def _extract_search_terms(self, request: str) -> List[str]:
+        """Extract search terms from request."""
+        import re
+        
+        # Look for quoted terms first  
+        quoted_terms = re.findall(r'["\']([^"\']+)["\']', request)
+        if quoted_terms:
+            return quoted_terms
+        
+        # Look for search-related patterns
+        search_patterns = [
+            r'(?:search|find|look)\s+for\s+([\w\s]+?)(?:\s+in|\s+within|$)',
+            r'find\s+([\w\s]+?)(?:\s+in|\s+within|$)',
+            r'search\s+([\w\s]+?)(?:\s+in|\s+within|$)'
+        ]
+        
+        terms = []
+        for pattern in search_patterns:
+            matches = re.findall(pattern, request.lower())
+            terms.extend([term.strip() for term in matches if len(term.strip()) > 2])
+        
+        # Fallback to keywords
+        if not terms:
+            words = request.lower().split()
+            terms = [word for word in words if len(word) > 3 and word not in ['search', 'find', 'look', 'within', 'files']]
+        
+        return terms[:5]  # Limit to 5 terms
+    
+    async def _execute_comprehensive_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute comprehensive actions using all MCP filesystem capabilities."""
+        try:
+            action_type = action.action_type
+            
+            if action_type == "copy":
+                return await self._execute_copy_action(action)
+            elif action_type == "move":
+                return await self._execute_move_action(action)
+            elif action_type == "create_directory":
+                return await self._execute_create_directory_action(action)
+            elif action_type == "analyze_structure":
+                return await self._execute_analyze_structure_action(action)
+            elif action_type == "search_files":
+                return await self._execute_search_files_action(action)
+            elif action_type == "search_content":
+                return await self._execute_search_content_action(action)
+            elif action_type == "read_multiple":
+                return await self._execute_read_multiple_action(action)
+            else:
+                return {
+                    "success": False,
+                    "action": action_type,
+                    "error": f"Unknown comprehensive action type: {action_type}"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": action.action_type,
+                "error": str(e)
+            }
+    
+    async def _execute_copy_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute file copy using MCP filesystem."""
+        try:
+            source = action.file_path
+            destination = action.code_snippet or f"{source}.backup"
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                await self.mcp_filesystem.copy_file(source, destination)
+                self.console.print(f"[dim]📋 Copied via MCP: {source} → {destination}[/dim]")
+            else:
+                # Local fallback
+                import shutil
+                shutil.copy2(source, destination)
+                self.console.print(f"[dim]📋 Copied locally: {source} → {destination}[/dim]")
+            
+            return {
+                "success": True,
+                "action": "copy",
+                "source": source,
+                "destination": destination
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "copy",
+                "error": str(e)
+            }
+    
+    async def _execute_move_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute file move using MCP filesystem."""
+        try:
+            source = action.file_path
+            destination = action.code_snippet
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                await self.mcp_filesystem.move_file(source, destination)
+                self.console.print(f"[dim]📦 Moved via MCP: {source} → {destination}[/dim]")
+            else:
+                # Local fallback
+                import shutil
+                shutil.move(source, destination)
+                self.console.print(f"[dim]📦 Moved locally: {source} → {destination}[/dim]")
+            
+            return {
+                "success": True,
+                "action": "move",
+                "source": source,
+                "destination": destination
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "move",
+                "error": str(e)
+            }
+    
+    async def _execute_create_directory_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute directory creation using MCP filesystem."""
+        try:
+            dir_path = action.file_path
+            success = await self._ensure_directory_exists(dir_path)
+            
+            return {
+                "success": success,
+                "action": "create_directory",
+                "path": dir_path
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "create_directory",
+                "error": str(e)
+            }
+    
+    async def _execute_analyze_structure_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute project structure analysis using MCP filesystem."""
+        try:
+            root_path = action.file_path
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                # Get comprehensive directory tree
+                tree = await self.mcp_filesystem.get_directory_tree(root_path, depth=3)
+                entries = await self.mcp_filesystem.list_directory(root_path)
+                
+                self.console.print(f"[dim]🗂️  Analyzed via MCP: {len(entries)} items, depth 3[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "analyze_structure",
+                    "entries_count": len(entries),
+                    "analysis": f"Found {len(entries)} items in project root"
+                }
+            else:
+                # Local fallback
+                root = Path(root_path)
+                entries = list(root.iterdir())
+                self.console.print(f"[dim]🗂️  Analyzed locally: {len(entries)} items[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "analyze_structure",
+                    "entries_count": len(entries),
+                    "analysis": f"Found {len(entries)} items in project root"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "analyze_structure",
+                "error": str(e)
+            }
+    
+    async def _execute_search_files_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute file search using MCP filesystem."""
+        try:
+            pattern = action.file_path
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                matches = await self.mcp_filesystem.search_files(self.project_root, f"*{pattern}*")
+                self.console.print(f"[dim]🔍 Found {len(matches)} files via MCP matching '{pattern}'[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "search_files",
+                    "pattern": pattern,
+                    "matches_count": len(matches),
+                    "files": [m.get('path', '') for m in matches[:5]]
+                }
+            else:
+                # Local fallback using glob
+                matches = list(self.project_root.rglob(f"*{pattern}*"))
+                self.console.print(f"[dim]🔍 Found {len(matches)} files locally[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "search_files",
+                    "pattern": pattern,
+                    "matches_count": len(matches),
+                    "files": [str(m) for m in matches[:5]]
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "search_files",
+                "error": str(e)
+            }
+    
+    async def _execute_search_content_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute content search using MCP filesystem."""
+        try:
+            search_term = action.file_path
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                matches = await self.mcp_filesystem.search_within_files(
+                    self.project_root, search_term, max_results=10
+                )
+                self.console.print(f"[dim]🔍 Found '{search_term}' in {len(matches)} files via MCP[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "search_content",
+                    "term": search_term,
+                    "matches_count": len(matches),
+                    "files": [m.get('path', '') for m in matches[:5]]
+                }
+            else:
+                # Basic local fallback
+                matches = []
+                for file_path in self.project_root.rglob("*.py"):
+                    try:
+                        content = file_path.read_text(encoding='utf-8', errors='ignore')
+                        if search_term.lower() in content.lower():
+                            matches.append(str(file_path))
+                        if len(matches) >= 10:
+                            break
+                    except Exception:
+                        continue
+                
+                self.console.print(f"[dim]🔍 Found '{search_term}' in {len(matches)} files locally[/dim]")
+                
+                return {
+                    "success": True,
+                    "action": "search_content",
+                    "term": search_term,
+                    "matches_count": len(matches),
+                    "files": matches[:5]
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "search_content",
+                "error": str(e)
+            }
+    
+    async def _execute_read_multiple_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute multiple file read using MCP filesystem."""
+        try:
+            file_paths = action.code_snippet.split(',')
+            
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                files_content = await self.mcp_filesystem.read_multiple_files(file_paths)
+                self.console.print(f"[dim]📖 Read {len(files_content)} files via MCP[/dim]")
+                
+                # Analyze combined content
+                total_lines = sum(len(content.split('\\n')) for content in files_content.values())
+                total_chars = sum(len(content) for content in files_content.values())
+                
+                return {
+                    "success": True,
+                    "action": "read_multiple",
+                    "files_count": len(files_content),
+                    "total_lines": total_lines,
+                    "total_chars": total_chars,
+                    "analysis": f"Read {len(files_content)} files: {total_lines} lines, {total_chars} characters"
+                }
+            else:
+                # Local fallback
+                files_content = {}
+                for file_path in file_paths:
+                    try:
+                        content = Path(file_path.strip()).read_text(encoding='utf-8', errors='ignore')
+                        files_content[file_path] = content
+                    except Exception:
+                        continue
+                
+                self.console.print(f"[dim]📖 Read {len(files_content)} files locally[/dim]")
+                
+                total_lines = sum(len(content.split('\\n')) for content in files_content.values())
+                total_chars = sum(len(content) for content in files_content.values())
+                
+                return {
+                    "success": True,
+                    "action": "read_multiple",
+                    "files_count": len(files_content),
+                    "total_lines": total_lines,
+                    "total_chars": total_chars
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "action": "read_multiple",
+                "error": str(e)
+            }
+    
+    def _extract_find_replace_from_description(self, description: str):
+        """Extract find/replace pairs from action description."""
+        pairs = []
+        
+        # Look for explicit find/replace patterns
+        import re
+        
+        # Pattern: "replace X with Y" or "change X to Y"
+        patterns = [
+            r'replace\\s+["\']?([^"\']+)["\']?\\s+with\\s+["\']?([^"\']+)["\']?',
+            r'change\\s+["\']?([^"\']+)["\']?\\s+to\\s+["\']?([^"\']+)["\']?',
+            r'update\\s+["\']?([^"\']+)["\']?\\s+to\\s+["\']?([^"\']+)["\']?'
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, description.lower())
+            pairs.extend(matches)
+        
+        # Default modifications if no specific patterns found
+        if not pairs:
+            if 'todo' in description.lower():
+                pairs.append(('TODO', 'DONE'))
+            elif 'fix' in description.lower():
+                pairs.append(('# TODO: Fix', '# Fixed:'))
+        
+        return pairs
