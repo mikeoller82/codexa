@@ -138,8 +138,8 @@ class EnhancedAIProvider(AIProvider):
                 original_model = self.base_provider.model
                 self.base_provider.model = model
             
-            # Call base provider
-            response = await self.base_provider.ask(prompt, history, context)
+            # Call base provider (synchronous call)
+            response = self.base_provider.ask(prompt, history, context)
             
             # Restore original model
             if model and hasattr(self.base_provider, 'model'):
