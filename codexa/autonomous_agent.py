@@ -4,6 +4,7 @@ Autonomous agent module for Codexa - handles proactive file discovery and autono
 
 import asyncio
 import logging
+import sys
 from pathlib import Path
 from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
@@ -72,15 +73,28 @@ class AutonomousAgent:
             except Exception as e:
                 self.logger.warning(f"MCP filesystem not available: {e}")
         
-        # Session state
-        self.permission_mode = PermissionMode.ASK_EACH_TIME
-        self.session_approved = False
+        # Session state - Default to auto-approve for better UX
+        self.permission_mode = PermissionMode.AUTO_APPROVE
+        self.session_approved = True
         self.discovered_files = []
         self.pending_actions = []
         
         # Project context
         self.project_root = Path.cwd()
         self.project_context = {}
+    
+    def _flush_console(self):
+        """Safely flush console output for real-time display."""
+        try:
+            if hasattr(self.console, '_file') and self.console._file:
+                self.console._file.flush()
+        except (AttributeError, OSError):
+            pass
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except (AttributeError, OSError):
+            pass
     
     async def process_request_autonomously(self, request: str, context: str = "") -> str:
         """
@@ -141,11 +155,14 @@ class AutonomousAgent:
         self.console.print(f"\n[bold blue]🔍 Processing request autonomously...[/bold blue]")
         self.console.print(f"[dim]Request: {request}[/dim]")
         
+        # Force console to display immediately with enhanced buffer control
+        self._flush_console()
+        
         try:
             # Step 1: Analyze request to determine scope and intent
             self.console.print(f"\n[bold yellow]🧠 Analyzing request...[/bold yellow]")
-            sys.stdout.flush()  # Force immediate display
-            time.sleep(0.1)  # Brief pause for visibility
+            self._flush_console()
+            time.sleep(0.15)  # Brief pause for visibility
             
             request_analysis = await self._analyze_request(request)
             
@@ -153,40 +170,40 @@ class AutonomousAgent:
             self.console.print(f"• Intent: {request_analysis['intent']}")
             self.console.print(f"• Scope: {request_analysis['scope']}")
             self.console.print(f"• Priority: {request_analysis['priority']}")
-            sys.stdout.flush()
+            self._flush_console()
             time.sleep(0.2)
             
             # Step 2: Discover relevant files proactively
             self.console.print(f"\n[bold yellow]📁 Discovering relevant files...[/bold yellow]")
-            sys.stdout.flush()
-            time.sleep(0.1)
+            self._flush_console()
+            time.sleep(0.15)
             
             discovered_files = await self._discover_relevant_files(request, request_analysis)
             if discovered_files:
                 await self._display_discovered_files(discovered_files)
-                sys.stdout.flush()
+                self._flush_console()
                 time.sleep(0.2)
             
             # Step 3: Analyze discovered code
             self.console.print(f"\n[bold yellow]🔍 Analyzing discovered code...[/bold yellow]")
-            sys.stdout.flush()
-            time.sleep(0.1)
+            self._flush_console()
+            time.sleep(0.15)
             
             code_analysis = await self._analyze_discovered_code(discovered_files, request)
             if code_analysis:
                 await self._display_code_analysis(code_analysis)
-                sys.stdout.flush()
+                self._flush_console()
                 time.sleep(0.2)
             
             # Step 4: Plan autonomous actions
             self.console.print(f"\n[bold yellow]🎯 Planning actions...[/bold yellow]")
-            sys.stdout.flush()
-            time.sleep(0.1)
+            self._flush_console()
+            time.sleep(0.15)
             
             planned_actions = await self._plan_autonomous_actions(request, discovered_files, code_analysis)
             if planned_actions:
                 await self._display_planned_actions(planned_actions)
-                sys.stdout.flush()
+                self._flush_console()
                 time.sleep(0.2)
             
             # Step 5: Get permission and execute actions
@@ -194,8 +211,8 @@ class AutonomousAgent:
                 permission_granted = await self._get_permission_for_actions(planned_actions)
                 if permission_granted:
                     self.console.print(f"\n[bold yellow]⚡ Executing actions...[/bold yellow]")
-                    sys.stdout.flush()
-                    time.sleep(0.1)
+                    self._flush_console()
+                    time.sleep(0.15)
                     
                     results = await self._execute_autonomous_actions_with_real_files(planned_actions)
                     return await self._format_execution_results(results)
@@ -575,8 +592,8 @@ class AutonomousAgent:
         
         for i, action in enumerate(actions):
             self.console.print(f"\n[bold blue]Action {i+1}/{len(actions)}:[/bold blue] {action.action_type} {action.file_path}")
-            sys.stdout.flush()
-            time.sleep(0.1)
+            self._flush_console()
+            time.sleep(0.15)
             
             try:
                 if action.action_type == "modify":
@@ -596,7 +613,7 @@ class AutonomousAgent:
                 else:
                     self.console.print(f"[red]❌ Failed: {result.get('error', 'Unknown error')}[/red]")
                 
-                sys.stdout.flush()
+                self._flush_console()
                 time.sleep(0.1)
                     
             except Exception as e:
@@ -629,44 +646,72 @@ class AutonomousAgent:
         }
     
     async def _execute_create_action_real(self, action: AutonomousAction) -> Dict[str, Any]:
-        """Execute a real file creation action."""
+        """Execute a real file creation action with enhanced error handling."""
         try:
             file_path = Path(action.file_path)
             
-            # Generate content based on file type and description
+            # Validate file path
+            if not action.file_path or action.file_path.strip() == "":
+                raise ValueError("File path cannot be empty")
+            
+            # Generate content based on file type and description  
             content = self._generate_file_content(action.file_path, action.description)
             
+            if not content or len(content.strip()) == 0:
+                raise ValueError("Generated content cannot be empty")
+            
             # Create directory if it doesn't exist
-            file_path.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                self.console.print(f"[dim]📁 Directory created: {file_path.parent}[/dim]")
+            except OSError as e:
+                raise OSError(f"Failed to create directory {file_path.parent}: {e}")
             
             # Use MCP filesystem if available
+            creation_method = "unknown"
             if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
                 try:
                     await self.mcp_filesystem.write_file(action.file_path, content)
-                    self.console.print(f"[dim]Created via MCP: {action.file_path}[/dim]")
+                    creation_method = "MCP"
+                    self.console.print(f"[dim]✨ Created via MCP: {action.file_path}[/dim]")
                 except Exception as e:
                     self.logger.warning(f"MCP file creation failed, using local: {e}")
                     # Fallback to local creation
                     file_path.write_text(content, encoding='utf-8')
-                    self.console.print(f"[dim]Created locally: {action.file_path}[/dim]")
+                    creation_method = "local_fallback"
+                    self.console.print(f"[dim]💾 Created locally (fallback): {action.file_path}[/dim]")
             else:
                 # Local file creation
                 file_path.write_text(content, encoding='utf-8')
-                self.console.print(f"[dim]Created locally: {action.file_path}[/dim]")
+                creation_method = "local"
+                self.console.print(f"[dim]💾 Created locally: {action.file_path}[/dim]")
+            
+            # Verify file was created
+            if not file_path.exists():
+                raise FileNotFoundError(f"File creation verification failed: {action.file_path}")
+            
+            file_size = file_path.stat().st_size
+            self.console.print(f"[dim]✅ File verified: {file_size} bytes[/dim]")
             
             return {
                 "success": True,
                 "action": "create",
                 "file": action.file_path,
                 "content": content[:200] + "..." if len(content) > 200 else content,
-                "size": len(content)
+                "size": file_size,
+                "method": creation_method,
+                "verified": True
             }
         except Exception as e:
+            error_msg = f"File creation failed: {str(e)}"
+            self.console.print(f"[red]❌ {error_msg}[/red]")
+            self.logger.error(f"File creation error for {action.file_path}: {e}")
             return {
                 "success": False,
                 "action": "create", 
                 "file": action.file_path,
-                "error": str(e)
+                "error": error_msg,
+                "details": str(e)
             }
     
     async def _execute_modify_action_real(self, action: AutonomousAction) -> Dict[str, Any]:
