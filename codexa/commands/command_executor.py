@@ -68,8 +68,21 @@ class CommandExecutor:
                     False, error=f"Command '{command.name}' is disabled"
                 )
             
+            # Map positional arguments to named parameters
+            mapped_kwargs = dict(parsed_command.kwargs)
+            if parsed_command.args:
+                # Get required parameters in order
+                required_params = [param for param in command.parameters if param.required]
+                
+                # Map positional args to required parameters
+                for i, arg in enumerate(parsed_command.args):
+                    if i < len(required_params):
+                        param_name = required_params[i].name
+                        if param_name not in mapped_kwargs:  # Don't override explicit kwargs
+                            mapped_kwargs[param_name] = arg
+            
             # Validate parameters
-            validation_errors = command.validate_parameters(parsed_command.kwargs)
+            validation_errors = command.validate_parameters(mapped_kwargs)
             if validation_errors:
                 return CommandExecutionResult(
                     False, error="Parameter validation failed:\n" + "\n".join(validation_errors)
@@ -78,7 +91,7 @@ class CommandExecutor:
             # Create execution context
             context = CommandContext(
                 user_input=input_text,
-                parsed_args={**parsed_command.kwargs, 'args': parsed_command.args, 'flags': parsed_command.flags},
+                parsed_args={**mapped_kwargs, 'args': parsed_command.args, 'flags': parsed_command.flags},
                 codexa_agent=codexa_agent,
                 mcp_service=mcp_service,
                 config=config,
