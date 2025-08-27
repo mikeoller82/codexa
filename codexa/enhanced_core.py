@@ -66,6 +66,15 @@ from .ux.suggestion_engine import SuggestionEngine
 from .mcp.advanced_health_monitor import AdvancedHealthMonitor
 from .plugins.plugin_manager import PluginManager
 
+# Search system imports
+try:
+    from .search.search_manager import SearchManager
+except ImportError:
+    # Fallback if search system not available
+    class SearchManager:
+        def __init__(self, *args, **kwargs): pass
+        def search(self, *args, **kwargs): return None
+
 # Legacy imports for compatibility
 from .planning import PlanningManager
 from .execution import TaskExecutionManager
@@ -139,12 +148,19 @@ class EnhancedCodexaAgent:
         # Display system
         self.startup_animation = StartupAnimation(console)
         
+        # Search system
+        try:
+            self.search_manager = SearchManager(self.cwd)
+        except Exception as e:
+            self.logger.warning(f"Search system not available: {e}")
+            self.search_manager = None
+
         # Legacy managers for compatibility
         self.planning_manager = PlanningManager(self.codexa_dir, self.provider)
         self.execution_manager = TaskExecutionManager(self.codexa_dir, self.provider)
         self.code_generator = CodeGenerator(self.cwd, self.provider)
         
-        self.logger.info("Enhanced Codexa agent initialized with Phase 3 features")
+        self.logger.info("Enhanced Codexa agent initialized with Phase 3 features and search capabilities")
 
     async def start_session(self) -> None:
         """Start an enhanced interactive Codexa session with Phase 3 features."""

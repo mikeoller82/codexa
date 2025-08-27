@@ -611,6 +611,54 @@ class BuiltInCommands:
             ConfigCommand()
         ]
         
+        # Import and register search commands
+        try:
+            from .search_commands import SearchCommand, FindCommand, GrepCommand, ProjectOverviewCommand
+            from ..search.search_manager import SearchManager
+            
+            # Initialize search manager
+            search_manager = SearchManager()
+            
+            # Add search commands with shared search manager
+            search_commands = [
+                SearchCommand(search_manager),
+                FindCommand(search_manager), 
+                GrepCommand(search_manager),
+                ProjectOverviewCommand(search_manager)
+            ]
+            
+            # Convert search commands to registry format
+            for search_cmd in search_commands:
+                # Create a wrapper command that follows the registry pattern
+                class RegistrySearchCommand(Command):
+                    def __init__(self, search_command):
+                        super().__init__()
+                        self.search_cmd = search_command
+                        self.name = search_command.get_name()
+                        self.description = search_command.get_description()
+                        self.category = CommandCategory.CORE
+                        self.parameters = []
+                        self.aliases = search_command.get_aliases()
+                    
+                    async def execute(self, context: CommandContext) -> str:
+                        # Convert context args to list format
+                        args = context.parsed_args.get("args", [])
+                        
+                        try:
+                            result = await self.search_cmd.execute(args, {})
+                            if result.success:
+                                return result.output or "[green]Command completed successfully[/green]"
+                            else:
+                                return f"[red]{result.error}[/red]"
+                        except Exception as e:
+                            return f"[red]Command failed: {e}[/red]"
+                
+                wrapped_cmd = RegistrySearchCommand(search_cmd)
+                commands.append(wrapped_cmd)
+                
+        except ImportError as e:
+            print(f"Warning: Could not import search commands: {e}")
+        
         for command in commands:
             registry.register(command)
         
