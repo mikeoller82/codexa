@@ -279,7 +279,7 @@ class AdvancedHealthMonitor(MCPHealthMonitor):
     
     async def _predictive_monitoring_loop(self):
         """Predictive monitoring loop to detect potential issues."""
-        while self._running:
+        while self.monitoring_active:
             try:
                 await self._run_predictive_analysis()
                 await asyncio.sleep(300)  # Run every 5 minutes
@@ -337,7 +337,7 @@ class AdvancedHealthMonitor(MCPHealthMonitor):
     
     async def _auto_recovery_loop(self):
         """Auto-recovery loop for handling unhealthy servers."""
-        while self._running:
+        while self.monitoring_active:
             try:
                 await self._process_recovery_queue()
                 await asyncio.sleep(60)  # Process recovery every minute
@@ -528,7 +528,7 @@ class AdvancedHealthMonitor(MCPHealthMonitor):
         """Export comprehensive health report."""
         return {
             "timestamp": datetime.now().isoformat(),
-            "monitoring_active": self._running,
+            "monitoring_active": self.monitoring_active,
             "servers": {
                 name: {
                     "current_health": metrics.__dict__ if metrics else None,
