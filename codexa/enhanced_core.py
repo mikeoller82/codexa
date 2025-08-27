@@ -610,7 +610,7 @@ class EnhancedCodexaAgent:
         
         # Check if this is a code generation request
         if self._is_code_generation_request(request):
-            self._handle_code_generation_request(request, context)
+            await self._handle_code_generation_request(request, context)
         else:
             # Handle as regular natural language request with enhanced provider
             response = await self.provider.ask(
@@ -861,7 +861,7 @@ Enhanced features require proper API keys and MCP server configurations.
         
         return has_code_keywords or has_file_extensions or has_code_phrases
 
-    def _handle_code_generation_request(self, request: str, context: str) -> None:
+    async def _handle_code_generation_request(self, request: str, context: str) -> None:
         """Handle a code generation request with MCP enhancement."""
         console.print("\n[cyan]🔨 Detected code generation request...[/cyan]")
         
@@ -899,11 +899,11 @@ Enhanced features require proper API keys and MCP server configurations.
                 console.print(f"[red]Failed to create {file_path}[/red]")
         else:
             # General code assistance with enhanced provider
-            response = asyncio.run(self.provider.ask(
+            response = await self.provider.ask(
                 prompt=f"Code generation request: {request}\n\nProvide implementation guidance and code examples.\n\n{context}",
                 history=self.history,
                 context=context
-            ))
+            )
             
             console.print("\n[bold green]Codexa:[/bold green]")
             console.print(Markdown(response))
