@@ -402,6 +402,7 @@ class EnhancedConfig:
         # Note: Dynamic model validation is deferred to avoid circular dependencies
         # If not in static config, we'll accept it and validate later when used
         if not model_available_statically:
+            import logging
             logger = logging.getLogger(__name__)
             logger.info(f"Model '{model_name}' not in static config, will validate when used")
         
