@@ -10,6 +10,51 @@ from abc import ABC, abstractmethod
 
 from .providers import AIProvider, OpenAIProvider, AnthropicProvider, OpenRouterProvider, OpenRouterOAIProvider
 from .enhanced_config import EnhancedConfig, ModelConfig, ProviderConfig
+from .config import Config
+
+
+class ConfigAdapter:
+    """Adapter to make EnhancedConfig compatible with legacy Config interface."""
+    
+    def __init__(self, enhanced_config: EnhancedConfig):
+        self.enhanced_config = enhanced_config
+    
+    def get_provider(self) -> str:
+        """Get the current provider."""
+        return self.enhanced_config.get_provider()
+    
+    def get_model(self, provider: str = None) -> str:
+        """Get the model for the specified provider."""
+        return self.enhanced_config.get_model(provider)
+    
+    def get_api_key(self, provider: str = None) -> str:
+        """Get the API key for the specified provider."""
+        return self.enhanced_config.get_api_key(provider)
+    
+    def has_valid_config(self) -> bool:
+        """Check if we have valid configuration."""
+        return self.enhanced_config.has_valid_config()
+    
+    # Legacy property access for compatibility
+    @property
+    def openai_api_key(self) -> str:
+        return self.enhanced_config.get_api_key("openai")
+    
+    @property
+    def anthropic_api_key(self) -> str:
+        return self.enhanced_config.get_api_key("anthropic")
+    
+    @property
+    def openrouter_api_key(self) -> str:
+        return self.enhanced_config.get_api_key("openrouter")
+    
+    @property
+    def user_config(self) -> dict:
+        return self.enhanced_config.user_config
+    
+    @property
+    def openrouter_use_oai_client(self) -> bool:
+        return self.enhanced_config.openrouter_use_oai_client
 
 
 @dataclass
@@ -247,23 +292,26 @@ class EnhancedProviderFactory:
     
     def _create_base_provider(self, name: str, config: ProviderConfig) -> Optional[AIProvider]:
         """Create base provider instance."""
+        # Create adapter for legacy compatibility
+        config_adapter = ConfigAdapter(self.config)
+        
         if name == "openai":
-            return OpenAIProvider(self.config)
+            return OpenAIProvider(config_adapter)
         elif name == "anthropic":
-            return AnthropicProvider(self.config)
+            return AnthropicProvider(config_adapter)
         elif name == "openrouter":
             # Use the OAI client approach by default for enhanced providers
             use_oai_client = getattr(config, 'use_oai_client', True)
             if use_oai_client:
-                return OpenRouterOAIProvider(self.config)
+                return OpenRouterOAIProvider(config_adapter)
             else:
-                return OpenRouterProvider(self.config)
+                return OpenRouterProvider(config_adapter)
         elif name == "openrouter-http":
             # Explicit HTTP requests approach
-            return OpenRouterProvider(self.config)
+            return OpenRouterProvider(config_adapter)
         elif name == "openrouter-oai":
             # Explicit OpenAI client approach
-            return OpenRouterOAIProvider(self.config)
+            return OpenRouterOAIProvider(config_adapter)
         else:
             self.logger.warning(f"Unknown provider type: {name}")
             return None

@@ -3,6 +3,7 @@ Enhanced configuration management for Codexa with multi-model and MCP support.
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 import yaml
@@ -135,20 +136,8 @@ class EnhancedConfig:
                 self.current_model = preferred_model
                 return preferred_model
             
-            # If not in static config, validate it exists via dynamic discovery
-            try:
-                from .services.model_service import ModelService
-                model_service = ModelService(self)
-                discovery_result = model_service._discover_provider_models(provider)
-                
-                if discovery_result.success:
-                    discovered_models = [m.get('id', m.get('name', '')) for m in discovery_result.models]
-                    if preferred_model in discovered_models:
-                        self.current_model = preferred_model
-                        return preferred_model
-            except ImportError:
-                # Model service not available, can't validate dynamic models
-                pass
+            # Note: Dynamic model validation is deferred to avoid circular dependencies
+            # during config initialization. The model will be validated when actually used.
         
         # Fallback to static models
         available_models = self.get_available_models(provider)
@@ -410,23 +399,11 @@ class EnhancedConfig:
         available_models = self.get_available_models(provider)
         model_available_statically = model_name in available_models
         
-        # If not in static config, try dynamic discovery
+        # Note: Dynamic model validation is deferred to avoid circular dependencies
+        # If not in static config, we'll accept it and validate later when used
         if not model_available_statically:
-            try:
-                from .services.model_service import ModelService
-                model_service = ModelService(self)
-                discovery_result = model_service._discover_provider_models(provider)
-                
-                if discovery_result.success:
-                    discovered_models = [m.get('id', m.get('name', '')) for m in discovery_result.models]
-                    if model_name not in discovered_models:
-                        return False  # Model not found even in dynamic discovery
-                else:
-                    return False  # Discovery failed, can't validate model
-            except ImportError:
-                # Model service not available, stick to static validation
-                if not model_available_statically:
-                    return False
+            logger = logging.getLogger(__name__)
+            logger.info(f"Model '{model_name}' not in static config, will validate when used")
         
         # Update runtime state
         self.current_model = model_name
