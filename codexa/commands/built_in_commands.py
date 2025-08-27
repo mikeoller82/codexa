@@ -611,6 +611,13 @@ class BuiltInCommands:
             ConfigCommand()
         ]
         
+        # Import and register autonomous commands
+        try:
+            from .autonomous_commands import AutonomousCommands
+            AutonomousCommands.register_all(registry)
+        except ImportError as e:
+            print(f"Warning: Could not import autonomous commands: {e}")
+
         # Import and register search commands
         try:
             from .search_commands import SearchCommand, FindCommand, GrepCommand, ProjectOverviewCommand

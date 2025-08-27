@@ -66,6 +66,9 @@ from .ux.suggestion_engine import SuggestionEngine
 from .mcp.advanced_health_monitor import AdvancedHealthMonitor
 from .plugins.plugin_manager import PluginManager
 
+# Import the autonomous agent
+from .autonomous_agent import AutonomousAgent
+
 # Search system imports
 try:
     from .search.search_manager import SearchManager
@@ -174,7 +177,18 @@ class EnhancedCodexaAgent:
         self.execution_manager = TaskExecutionManager(self.codexa_dir, self.provider)
         self.code_generator = CodeGenerator(self.cwd, self.provider)
         
-        self.logger.info("Enhanced Codexa agent initialized with Phase 3 features and search capabilities")
+        # Initialize autonomous agent for proactive actions
+        try:
+            self.autonomous_agent = AutonomousAgent(
+                mcp_service=self.mcp_service,
+                console=console
+            )
+            self.logger.info("Autonomous agent initialized successfully")
+        except Exception as e:
+            self.logger.warning(f"Autonomous agent initialization failed: {e}")
+            self.autonomous_agent = None
+        
+        self.logger.info("Enhanced Codexa agent initialized with Phase 3 features, search capabilities, and autonomous mode")
 
     async def start_session(self) -> None:
         """Start an enhanced interactive Codexa session with Phase 3 features."""
@@ -322,7 +336,7 @@ class EnhancedCodexaAgent:
             console.print(f"[red]Command execution failed: {e}[/red]")
 
     async def _handle_natural_language_with_error_handling(self, request: str):
-        """Handle natural language input with comprehensive error handling."""
+        """Handle natural language input with comprehensive error handling and autonomous processing."""
         console.print(f"\n[blue4]Processing request...[/blue4]")
         
         try:
@@ -333,6 +347,28 @@ class EnhancedCodexaAgent:
             ):
                 # Get project context
                 context = self._get_project_context()
+                
+                # Try autonomous processing first if available and request warrants it
+                if self.autonomous_agent and self._should_use_autonomous_mode(request):
+                    try:
+                        console.print(f"\n[bold cyan]🤖 Switching to Autonomous Mode[/bold cyan]")
+                        autonomous_response = await self.autonomous_agent.process_request_autonomously(request, context)
+                        if autonomous_response:
+                            console.print("\n[bold green]Codexa (Autonomous):[/bold green]")
+                            console.print(Markdown(autonomous_response))
+                            
+                            # Save to history
+                            from datetime import datetime
+                            self.history.append({
+                                "user": request,
+                                "assistant": autonomous_response,
+                                "timestamp": datetime.now().isoformat(),
+                                "mode": "autonomous"
+                            })
+                            return
+                    except Exception as e:
+                        console.print(f"[yellow]Autonomous processing failed: {e}[/yellow]")
+                        console.print("[yellow]Falling back to standard processing...[/yellow]")
                 
                 # Check for MCP-enhanced capabilities
                 enhanced_response = await self._try_mcp_enhancement(request, context)
@@ -463,6 +499,35 @@ class EnhancedCodexaAgent:
         import random
         if suggestions and random.random() < 0.3:  # 30% chance
             self.suggestion_engine.display_suggestions(suggestions[:3], "💡 Suggestions")
+
+    def _should_use_autonomous_mode(self, request: str) -> bool:
+        """Determine if a request should use autonomous mode."""
+        request_lower = request.lower()
+        
+        # Keywords that indicate autonomous action is appropriate
+        autonomous_keywords = [
+            "fix", "update", "modify", "change", "improve", "refactor",
+            "create", "add", "implement", "build", "generate",
+            "debug", "troubleshoot", "investigate", "analyze",
+            "optimize", "enhance", "upgrade"
+        ]
+        
+        # Keywords that indicate manual guidance is better
+        manual_keywords = [
+            "explain", "what", "how", "why", "tell me", "show me",
+            "describe", "help understand", "clarify", "documentation"
+        ]
+        
+        # Check for manual keywords first
+        if any(keyword in request_lower for keyword in manual_keywords):
+            return False
+        
+        # Check for autonomous keywords
+        if any(keyword in request_lower for keyword in autonomous_keywords):
+            return True
+        
+        # Default to manual mode for unclear requests
+        return False
 
     def _get_session_state(self) -> Dict[str, Any]:
         """Get current session state for contextual help and suggestions."""

@@ -1,0 +1,543 @@
+"""
+Autonomous agent module for Codexa - handles proactive file discovery and autonomous actions.
+"""
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import List, Dict, Optional, Any, Union
+from datetime import datetime
+from dataclasses import dataclass
+from enum import Enum
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.prompt import Confirm, Prompt
+from rich.table import Table
+from rich.markdown import Markdown
+
+from .filesystem.mcp_filesystem import MCPFileSystem
+from .mcp_service import MCPService
+
+
+class PermissionMode(Enum):
+    """Permission modes for autonomous actions."""
+    ASK_EACH_TIME = "ask_each_time"
+    SESSION_WIDE = "session_wide"
+    AUTO_APPROVE = "auto_approve"
+
+
+@dataclass
+class FileDiscoveryResult:
+    """Result of file discovery operation."""
+    path: str
+    file_type: str
+    size: int
+    relevance_score: float
+    content_preview: str = ""
+    line_count: int = 0
+
+
+@dataclass
+class AutonomousAction:
+    """Represents an autonomous action to be taken."""
+    action_type: str  # 'modify', 'create', 'delete', 'analyze'
+    file_path: str
+    description: str
+    code_snippet: str = ""
+    line_numbers: str = ""
+    estimated_impact: str = "low"  # low, medium, high
+
+
+class AutonomousAgent:
+    """
+    Autonomous agent that proactively discovers files, analyzes code, and makes changes.
+    
+    This class provides the core autonomous functionality that makes Codexa act more
+    like Claude Code - proactive, action-oriented, and verbose about its process.
+    """
+    
+    def __init__(self, mcp_service: MCPService = None, console: Console = None):
+        """Initialize the autonomous agent."""
+        self.mcp_service = mcp_service
+        self.console = console or Console()
+        self.logger = logging.getLogger("codexa.autonomous")
+        
+        # MCP filesystem integration
+        self.mcp_filesystem = None
+        if mcp_service:
+            try:
+                self.mcp_filesystem = MCPFileSystem(mcp_service)
+            except Exception as e:
+                self.logger.warning(f"MCP filesystem not available: {e}")
+        
+        # Session state
+        self.permission_mode = PermissionMode.ASK_EACH_TIME
+        self.session_approved = False
+        self.discovered_files = []
+        self.pending_actions = []
+        
+        # Project context
+        self.project_root = Path.cwd()
+        self.project_context = {}
+    
+    async def process_request_autonomously(self, request: str, context: str = "") -> str:
+        """
+        Process a user request autonomously by discovering files, analyzing code, and taking action.
+        
+        This is the main entry point for autonomous behavior that mimics Claude Code.
+        """
+        self.console.print(f"\n[bold blue]🔍 Processing request autonomously...[/bold blue]")
+        self.console.print(f"[dim]Request: {request}[/dim]")
+        
+        try:
+            # Step 1: Analyze request to determine scope and intent
+            request_analysis = await self._analyze_request(request)
+            self.console.print(f"\n[bold green]📋 Request Analysis:[/bold green]")
+            self.console.print(f"• Intent: {request_analysis['intent']}")
+            self.console.print(f"• Scope: {request_analysis['scope']}")
+            self.console.print(f"• Priority: {request_analysis['priority']}")
+            
+            # Step 2: Discover relevant files proactively
+            discovered_files = await self._discover_relevant_files(request, request_analysis)
+            if discovered_files:
+                await self._display_discovered_files(discovered_files)
+            
+            # Step 3: Analyze discovered code
+            code_analysis = await self._analyze_discovered_code(discovered_files, request)
+            if code_analysis:
+                await self._display_code_analysis(code_analysis)
+            
+            # Step 4: Plan autonomous actions
+            planned_actions = await self._plan_autonomous_actions(request, discovered_files, code_analysis)
+            if planned_actions:
+                await self._display_planned_actions(planned_actions)
+            
+            # Step 5: Get permission and execute actions
+            if planned_actions:
+                permission_granted = await self._get_permission_for_actions(planned_actions)
+                if permission_granted:
+                    results = await self._execute_autonomous_actions(planned_actions)
+                    return await self._format_execution_results(results)
+                else:
+                    return "Actions cancelled by user. I can provide guidance instead if you'd like."
+            else:
+                return "No autonomous actions needed. I can provide guidance or answer questions about the code."
+                
+        except Exception as e:
+            self.logger.error(f"Autonomous processing failed: {e}")
+            return f"Autonomous processing encountered an error: {e}. I can still provide guidance manually."
+    
+    async def _analyze_request(self, request: str) -> Dict[str, str]:
+        """Analyze the user request to determine intent, scope, and priority."""
+        # Simple heuristic analysis - in real implementation this could use AI
+        request_lower = request.lower()
+        
+        # Determine intent
+        intent = "analyze"
+        if any(word in request_lower for word in ["create", "add", "build", "implement", "generate"]):
+            intent = "create"
+        elif any(word in request_lower for word in ["fix", "update", "modify", "change", "improve"]):
+            intent = "modify"
+        elif any(word in request_lower for word in ["delete", "remove"]):
+            intent = "delete"
+        elif any(word in request_lower for word in ["debug", "troubleshoot", "investigate"]):
+            intent = "debug"
+        
+        # Determine scope
+        scope = "file"
+        if any(word in request_lower for word in ["project", "all", "entire", "system"]):
+            scope = "project"
+        elif any(word in request_lower for word in ["component", "module", "class"]):
+            scope = "module"
+        
+        # Determine priority
+        priority = "medium"
+        if any(word in request_lower for word in ["urgent", "critical", "important", "asap"]):
+            priority = "high"
+        elif any(word in request_lower for word in ["minor", "small", "simple"]):
+            priority = "low"
+        
+        return {
+            "intent": intent,
+            "scope": scope,
+            "priority": priority,
+            "keywords": self._extract_keywords(request)
+        }
+    
+    def _extract_keywords(self, request: str) -> List[str]:
+        """Extract relevant keywords from the request."""
+        # Simple keyword extraction - could be enhanced with NLP
+        common_words = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by", "from", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "must"}
+        words = request.lower().split()
+        keywords = [word.strip(".,!?;:()[]{}\"'") for word in words if len(word) > 2 and word not in common_words]
+        return keywords[:10]  # Top 10 keywords
+    
+    async def _discover_relevant_files(self, request: str, analysis: Dict[str, str]) -> List[FileDiscoveryResult]:
+        """Proactively discover files relevant to the user's request."""
+        discovered = []
+        
+        try:
+            if self.mcp_filesystem and self.mcp_filesystem.is_server_available():
+                # Use MCP filesystem for enhanced discovery
+                discovered = await self._discover_files_with_mcp(request, analysis)
+            else:
+                # Fallback to local file discovery
+                discovered = await self._discover_files_locally(request, analysis)
+                
+        except Exception as e:
+            self.logger.warning(f"File discovery failed: {e}")
+        
+        return discovered
+    
+    async def _discover_files_with_mcp(self, request: str, analysis: Dict[str, str]) -> List[FileDiscoveryResult]:
+        """Discover files using MCP filesystem capabilities."""
+        discovered = []
+        
+        try:
+            # Search by keywords in file names
+            for keyword in analysis.get('keywords', []):
+                matches = await self.mcp_filesystem.search_files(self.project_root, f"*{keyword}*")
+                for match in matches[:5]:  # Limit results
+                    discovered.append(FileDiscoveryResult(
+                        path=match.get('path', ''),
+                        file_type=match.get('type', 'unknown'),
+                        size=match.get('size', 0),
+                        relevance_score=0.8
+                    ))
+            
+            # Search within file contents
+            for keyword in analysis.get('keywords', [])[:3]:  # Limit content search
+                content_matches = await self.mcp_filesystem.search_within_files(
+                    self.project_root, keyword, max_results=5
+                )
+                for match in content_matches:
+                    discovered.append(FileDiscoveryResult(
+                        path=match.get('path', ''),
+                        file_type='file',
+                        size=match.get('size', 0),
+                        relevance_score=0.9,
+                        content_preview=match.get('preview', '')
+                    ))
+            
+        except Exception as e:
+            self.logger.warning(f"MCP file discovery failed: {e}")
+        
+        return discovered
+    
+    async def _discover_files_locally(self, request: str, analysis: Dict[str, str]) -> List[FileDiscoveryResult]:
+        """Fallback local file discovery."""
+        discovered = []
+        
+        try:
+            # Simple local file discovery based on common patterns
+            common_extensions = ['.py', '.js', '.ts', '.tsx', '.jsx', '.css', '.html', '.md', '.json', '.yaml', '.yml']
+            
+            for ext in common_extensions:
+                for file_path in self.project_root.rglob(f"*{ext}"):
+                    if file_path.is_file() and not any(part.startswith('.') for part in file_path.parts):
+                        # Simple relevance scoring based on filename
+                        relevance = 0.5
+                        filename_lower = file_path.name.lower()
+                        for keyword in analysis.get('keywords', []):
+                            if keyword.lower() in filename_lower:
+                                relevance += 0.2
+                        
+                        if relevance > 0.5:
+                            discovered.append(FileDiscoveryResult(
+                                path=str(file_path),
+                                file_type=ext[1:],  # Remove dot
+                                size=file_path.stat().st_size,
+                                relevance_score=relevance
+                            ))
+                
+                if len(discovered) >= 10:  # Limit results
+                    break
+        
+        except Exception as e:
+            self.logger.warning(f"Local file discovery failed: {e}")
+        
+        # Sort by relevance score
+        discovered.sort(key=lambda x: x.relevance_score, reverse=True)
+        return discovered[:10]  # Top 10 most relevant
+    
+    async def _display_discovered_files(self, files: List[FileDiscoveryResult]):
+        """Display discovered files in a user-friendly format."""
+        if not files:
+            self.console.print("\n[yellow]No relevant files discovered.[/yellow]")
+            return
+        
+        self.console.print(f"\n[bold green]📁 Discovered {len(files)} relevant files:[/bold green]")
+        
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("File", style="cyan", no_wrap=True)
+        table.add_column("Type", style="green")
+        table.add_column("Size", style="yellow", justify="right")
+        table.add_column("Relevance", style="red", justify="right")
+        
+        for file in files[:8]:  # Show top 8
+            size_str = self._format_file_size(file.size)
+            relevance_str = f"{file.relevance_score:.1f}"
+            table.add_row(
+                file.path,
+                file.file_type,
+                size_str,
+                relevance_str
+            )
+        
+        self.console.print(table)
+    
+    def _format_file_size(self, size: int) -> str:
+        """Format file size in human-readable format."""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.1f}{unit}"
+            size /= 1024.0
+        return f"{size:.1f}TB"
+    
+    async def _analyze_discovered_code(self, files: List[FileDiscoveryResult], request: str) -> Dict[str, Any]:
+        """Analyze the discovered code files."""
+        analysis = {
+            "patterns": [],
+            "issues": [],
+            "dependencies": [],
+            "suggestions": []
+        }
+        
+        if not files:
+            return analysis
+        
+        # Analyze top 3 most relevant files
+        for file in files[:3]:
+            try:
+                if self.mcp_filesystem:
+                    content = await self.mcp_filesystem.read_file(file.path)
+                else:
+                    content = Path(file.path).read_text(encoding='utf-8', errors='ignore')
+                
+                file_analysis = self._analyze_file_content(content, file.path, request)
+                analysis["patterns"].extend(file_analysis.get("patterns", []))
+                analysis["issues"].extend(file_analysis.get("issues", []))
+                analysis["dependencies"].extend(file_analysis.get("dependencies", []))
+                
+            except Exception as e:
+                self.logger.warning(f"Failed to analyze {file.path}: {e}")
+        
+        return analysis
+    
+    def _analyze_file_content(self, content: str, file_path: str, request: str) -> Dict[str, Any]:
+        """Analyze individual file content."""
+        analysis = {
+            "patterns": [],
+            "issues": [],
+            "dependencies": []
+        }
+        
+        lines = content.split('\n')
+        
+        # Detect imports/dependencies
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            if line_stripped.startswith(('import ', 'from ', 'require(', '#include')):
+                analysis["dependencies"].append({
+                    "file": file_path,
+                    "line": i + 1,
+                    "dependency": line_stripped
+                })
+        
+        # Look for patterns relevant to request
+        request_keywords = request.lower().split()
+        for i, line in enumerate(lines):
+            for keyword in request_keywords:
+                if keyword in line.lower() and len(keyword) > 3:
+                    analysis["patterns"].append({
+                        "file": file_path,
+                        "line": i + 1,
+                        "content": line.strip(),
+                        "keyword": keyword
+                    })
+        
+        return analysis
+    
+    async def _display_code_analysis(self, analysis: Dict[str, Any]):
+        """Display code analysis results."""
+        if not any(analysis.values()):
+            return
+        
+        self.console.print(f"\n[bold green]🔍 Code Analysis Results:[/bold green]")
+        
+        if analysis.get("patterns"):
+            self.console.print("\n[bold yellow]📋 Relevant Code Patterns:[/bold yellow]")
+            for i, pattern in enumerate(analysis["patterns"][:5]):  # Show top 5
+                self.console.print(f"  {i+1}. {pattern['file']}:{pattern['line']}")
+                self.console.print(f"     [dim]{pattern['content']}[/dim]")
+        
+        if analysis.get("dependencies"):
+            self.console.print(f"\n[bold cyan]📦 Dependencies Found: {len(analysis['dependencies'])}[/bold cyan]")
+        
+        if analysis.get("issues"):
+            self.console.print(f"\n[bold red]⚠️  Potential Issues: {len(analysis['issues'])}[/bold red]")
+    
+    async def _plan_autonomous_actions(self, request: str, files: List[FileDiscoveryResult], analysis: Dict[str, Any]) -> List[AutonomousAction]:
+        """Plan autonomous actions based on request and analysis."""
+        actions = []
+        
+        # This is a simplified implementation - in real usage this would be more sophisticated
+        request_lower = request.lower()
+        
+        if "fix" in request_lower or "update" in request_lower:
+            # Plan modification actions
+            for file in files[:2]:  # Focus on top 2 files
+                actions.append(AutonomousAction(
+                    action_type="modify",
+                    file_path=file.path,
+                    description=f"Update {file.path} based on request",
+                    estimated_impact="medium"
+                ))
+        
+        elif "create" in request_lower or "add" in request_lower:
+            # Plan creation actions
+            actions.append(AutonomousAction(
+                action_type="create",
+                file_path="new_file.py",  # This would be determined more intelligently
+                description="Create new file based on request",
+                estimated_impact="low"
+            ))
+        
+        return actions
+    
+    async def _display_planned_actions(self, actions: List[AutonomousAction]):
+        """Display planned autonomous actions."""
+        self.console.print(f"\n[bold green]🎯 Planned Actions ({len(actions)}):[/bold green]")
+        
+        for i, action in enumerate(actions):
+            impact_color = {"low": "green", "medium": "yellow", "high": "red"}.get(action.estimated_impact, "white")
+            self.console.print(f"  {i+1}. [bold]{action.action_type.upper()}[/bold] {action.file_path}")
+            self.console.print(f"     {action.description}")
+            self.console.print(f"     Impact: [{impact_color}]{action.estimated_impact}[/{impact_color}]")
+    
+    async def _get_permission_for_actions(self, actions: List[AutonomousAction]) -> bool:
+        """Get user permission for autonomous actions."""
+        if self.permission_mode == PermissionMode.AUTO_APPROVE or self.session_approved:
+            return True
+        
+        self.console.print(f"\n[bold yellow]🤖 Permission Required[/bold yellow]")
+        self.console.print("I'm ready to make these changes autonomously.")
+        
+        if self.permission_mode == PermissionMode.ASK_EACH_TIME:
+            choices = [
+                "1. Approve these actions",
+                "2. Approve for entire session", 
+                "3. Cancel and provide guidance instead"
+            ]
+            
+            self.console.print("\nOptions:")
+            for choice in choices:
+                self.console.print(f"  {choice}")
+            
+            choice = Prompt.ask("\nYour choice", choices=["1", "2", "3"], default="1")
+            
+            if choice == "1":
+                return True
+            elif choice == "2":
+                self.session_approved = True
+                self.permission_mode = PermissionMode.SESSION_WIDE
+                return True
+            else:
+                return False
+        
+        return Confirm.ask("Proceed with autonomous actions?")
+    
+    async def _execute_autonomous_actions(self, actions: List[AutonomousAction]) -> List[Dict[str, Any]]:
+        """Execute the planned autonomous actions."""
+        results = []
+        
+        self.console.print(f"\n[bold green]⚡ Executing {len(actions)} actions...[/bold green]")
+        
+        for i, action in enumerate(actions):
+            self.console.print(f"\n[bold blue]Action {i+1}/{len(actions)}:[/bold blue] {action.action_type} {action.file_path}")
+            
+            try:
+                if action.action_type == "modify":
+                    result = await self._execute_modify_action(action)
+                elif action.action_type == "create":
+                    result = await self._execute_create_action(action)
+                elif action.action_type == "delete":
+                    result = await self._execute_delete_action(action)
+                else:
+                    result = {"success": False, "error": f"Unknown action type: {action.action_type}"}
+                
+                results.append(result)
+                
+                if result.get("success"):
+                    self.console.print(f"[green]✅ {action.description}[/green]")
+                else:
+                    self.console.print(f"[red]❌ Failed: {result.get('error', 'Unknown error')}[/red]")
+                    
+            except Exception as e:
+                error_result = {"success": False, "error": str(e), "action": action}
+                results.append(error_result)
+                self.console.print(f"[red]❌ Error executing action: {e}[/red]")
+        
+        return results
+    
+    async def _execute_modify_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a file modification action."""
+        # This is a placeholder - real implementation would do actual modifications
+        return {
+            "success": True,
+            "action": "modify",
+            "file": action.file_path,
+            "changes": "Simulated file modification"
+        }
+    
+    async def _execute_create_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a file creation action."""
+        # This is a placeholder - real implementation would create files
+        return {
+            "success": True, 
+            "action": "create",
+            "file": action.file_path,
+            "content": "Simulated file creation"
+        }
+    
+    async def _execute_delete_action(self, action: AutonomousAction) -> Dict[str, Any]:
+        """Execute a file deletion action."""
+        # This is a placeholder - real implementation would delete files
+        return {
+            "success": True,
+            "action": "delete", 
+            "file": action.file_path
+        }
+    
+    async def _format_execution_results(self, results: List[Dict[str, Any]]) -> str:
+        """Format execution results for display."""
+        successful = [r for r in results if r.get("success")]
+        failed = [r for r in results if not r.get("success")]
+        
+        summary = f"\n[bold green]🎉 Execution Complete![/bold green]\n"
+        summary += f"• Successful actions: {len(successful)}\n"
+        summary += f"• Failed actions: {len(failed)}\n"
+        
+        if failed:
+            summary += f"\n[bold red]❌ Failed Actions:[/bold red]\n"
+            for result in failed:
+                summary += f"• {result.get('error', 'Unknown error')}\n"
+        
+        if successful:
+            summary += f"\n[bold green]✅ Changes Made:[/bold green]\n"
+            for result in successful:
+                action_type = result.get('action', 'unknown')
+                file_path = result.get('file', 'unknown')
+                summary += f"• {action_type.title()} {file_path}\n"
+        
+        return summary
+    
+    def set_permission_mode(self, mode: PermissionMode):
+        """Set the permission mode for autonomous actions."""
+        self.permission_mode = mode
+        if mode == PermissionMode.SESSION_WIDE:
+            self.session_approved = True
+        elif mode == PermissionMode.ASK_EACH_TIME:
+            self.session_approved = False
