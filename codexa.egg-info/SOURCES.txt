@@ -24,10 +24,12 @@ codexa/analytics/__init__.py
 codexa/analytics/dashboard.py
 codexa/analytics/ml_engine.py
 codexa/commands/__init__.py
+codexa/commands/base_command.py
 codexa/commands/built_in_commands.py
 codexa/commands/command_executor.py
 codexa/commands/command_parser.py
 codexa/commands/command_registry.py
+codexa/commands/search_commands.py
 codexa/deployment/__init__.py
 codexa/deployment/deployment_manager.py
 codexa/display/__init__.py
@@ -38,6 +40,8 @@ codexa/error_handling/__init__.py
 codexa/error_handling/error_manager.py
 codexa/error_handling/recovery_manager.py
 codexa/error_handling/user_guidance.py
+codexa/filesystem/__init__.py
+codexa/filesystem/mcp_filesystem.py
 codexa/localization/__init__.py
 codexa/localization/localization_manager.py
 codexa/localization/translator.py
@@ -54,6 +58,11 @@ codexa/optimization/performance_optimizer.py
 codexa/plugins/__init__.py
 codexa/plugins/plugin_manager.py
 codexa/plugins/security_sandbox.py
+codexa/search/__init__.py
+codexa/search/code_search.py
+codexa/search/file_search.py
+codexa/search/pattern_matcher.py
+codexa/search/search_manager.py
 codexa/services/__init__.py
 codexa/services/model_service.py
 codexa/ui/__init__.py

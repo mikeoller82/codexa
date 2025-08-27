@@ -143,7 +143,7 @@ pip install codexa
 
 #### Option 3: Development Install
 ```bash
-git clone https://github.com/yourusername/codexa.git
+git clone https://github.com/mikeoller82/codexa.git
 cd codexa
 pip install -e .
 ```
@@ -396,9 +396,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 📖 **Documentation**: [Full documentation](https://yourusername.github.io/codexa) (coming soon)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/yourusername/codexa/discussions)
-- 🐛 **Issues**: [Report bugs](https://github.com/yourusername/codexa/issues)
+- 📖 **Documentation**: [Full documentation](https://mikeoller82.github.io/codexa) (coming soon)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/mikeoller82/codexa/discussions)
+- 🐛 **Issues**: [Report bugs](https://github.com/mikeoller82/codexa/issues)
 - 📧 **Email**: support@codexa.dev (coming soon)
 
 ---
