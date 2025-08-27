@@ -1,5 +1,10 @@
 # Comprehensive MCP action methods for autonomous agent
 
+from pathlib import Path
+from typing import Any, Dict
+from codexa.autonomous_agent import AutonomousAction
+
+
 async def _execute_comprehensive_action(self, action: AutonomousAction) -> Dict[str, Any]:
     """Execute comprehensive actions using all MCP filesystem capabilities."""
     try:
