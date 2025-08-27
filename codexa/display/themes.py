@@ -62,7 +62,7 @@ class ThemeManager:
             ),
             ColorTheme.LIGHT: ThemeColors(
                 primary="blue",
-                secondary="dim",
+                secondary="blue4",
                 accent="black",
                 background="white",
                 text="black",
@@ -114,3 +114,19 @@ class ThemeManager:
     def get_available_themes(self) -> list[str]:
         """Get list of available theme names."""
         return [theme.value for theme in ColorTheme]
+    
+    def get_secondary_color(self, theme: Optional[ColorTheme] = None) -> str:
+        """Get secondary color that's visible for the current theme."""
+        theme = theme or self.current_theme
+        colors = self.themes[theme]
+        
+        # Use a more visible alternative for light backgrounds
+        if theme == ColorTheme.LIGHT:
+            return "blue4"  # Dark blue, visible on light backgrounds
+        else:
+            return colors.secondary
+    
+    def style_secondary_text(self, text: str, theme: Optional[ColorTheme] = None) -> str:
+        """Style text with appropriate secondary color for visibility."""
+        secondary_color = self.get_secondary_color(theme)
+        return f"[{secondary_color}]{text}[/{secondary_color}]"

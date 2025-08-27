@@ -138,6 +138,9 @@ class EnhancedConfig:
             
             # Note: Dynamic model validation is deferred to avoid circular dependencies
             # during config initialization. The model will be validated when actually used.
+            # For now, trust the user's saved preference and use it
+            self.current_model = preferred_model
+            return preferred_model
         
         # Fallback to static models
         available_models = self.get_available_models(provider)

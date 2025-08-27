@@ -323,7 +323,7 @@ class EnhancedCodexaAgent:
 
     async def _handle_natural_language_with_error_handling(self, request: str):
         """Handle natural language input with comprehensive error handling."""
-        console.print(f"\n[dim]Processing request...[/dim]")
+        console.print(f"\n[blue4]Processing request...[/blue4]")
         
         try:
             with self.error_manager.error_context(
@@ -592,7 +592,7 @@ class EnhancedCodexaAgent:
 
     async def _handle_natural_language(self, request: str):
         """Handle natural language input with enhanced capabilities."""
-        console.print(f"\n[dim]Processing request...[/dim]")
+        console.print(f"\n[blue4]Processing request...[/blue4]")
         
         # Get project context
         context = self._get_project_context()

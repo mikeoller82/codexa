@@ -157,7 +157,7 @@ class ProviderCommand(Command):
             if success:
                 return f"[green]✓ Successfully switched to and saved provider: {provider_name}[/green]"
             else:
-                return f"[red]✗ Failed to switch to provider: {provider_name}[/red]\n[dim]Check if the provider is available and has a valid API key[/dim]"
+                return f"[red]✗ Failed to switch to provider: {provider_name}[/red]\n[blue4]Check if the provider is available and has a valid API key[/blue4]"
         
         elif action == "status":
             current_provider = context.config.get_provider()
@@ -222,7 +222,7 @@ class ModelCommand(Command):
                 marker = " [green]✓[/green]" if model == current_model else ""
                 result.append(f"• {model}{marker}")
             
-            result.append(f"\n[dim]Use `/model discover` to fetch models from provider APIs[/dim]")
+            result.append(f"\n[blue4]Use `/model discover` to fetch models from provider APIs[/blue4]")
             return "\n".join(result)
         
         elif action == "discover":
@@ -274,7 +274,7 @@ class ModelCommand(Command):
                     result.append(f"[red]{provider}: Failed - {discovery_result.error}[/red]")
             
             result.insert(0, f"[bold green]Discovered {total_models} models total[/bold green]\n")
-            result.append(f"\n[dim]Use `/model select` for interactive selection[/dim]")
+            result.append(f"\n[blue4]Use `/model select` for interactive selection[/blue4]")
             
             return "\n".join(result)
         
@@ -297,7 +297,7 @@ class ModelCommand(Command):
                         if success:
                             return f"[green]✓ Successfully selected and saved: {model_name} ({provider})[/green]"
                         else:
-                            return f"[red]✗ Selected {model_name} ({provider}) but failed to save configuration[/red]\n[dim]The model is active for this session but won't persist[/dim]"
+                            return f"[red]✗ Selected {model_name} ({provider}) but failed to save configuration[/red]\n[blue4]The model is active for this session but won't persist[/blue4]"
                     else:
                         return f"[yellow]Selected: {model_name} ({provider}) - Manual config update needed[/yellow]"
                 else:
@@ -317,7 +317,7 @@ class ModelCommand(Command):
                 if success:
                     return f"[green]✓ Successfully switched to and saved: {model_name}{f' ({provider})' if provider else ''}[/green]"
                 else:
-                    return f"[red]✗ Failed to switch to model: {model_name}[/red]\n[dim]Check if the model exists for the provider[/dim]"
+                    return f"[red]✗ Failed to switch to model: {model_name}[/red]\n[blue4]Check if the model exists for the provider[/blue4]"
             else:
                 # Fallback for basic config
                 success = False

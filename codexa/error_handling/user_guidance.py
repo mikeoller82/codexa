@@ -304,12 +304,12 @@ class UserGuidanceSystem:
         if self.user_context.user_level == "beginner":
             content_parts.extend([
                 "",
-                "[dim]💡 Tip: Start with `/help` to explore available commands.[/dim]"
+                "[blue4]💡 Tip: Start with `/help` to explore available commands.[/blue4]"
             ])
         elif self.user_context.user_level == "advanced":
             content_parts.extend([
                 "",
-                "[dim]💡 Tip: Use command flags for advanced options.[/dim]"
+                "[blue4]💡 Tip: Use command flags for advanced options.[/blue4]"
             ])
         
         return "\n".join(content_parts)
