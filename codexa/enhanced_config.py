@@ -124,18 +124,36 @@ class EnhancedConfig:
         if self.current_model and self.current_provider == provider:
             return self.current_model
         
-        # Get available models for provider
-        available_models = self.get_available_models(provider)
-        if not available_models:
-            return "gpt-4o-mini"  # Fallback
-        
-        # Try user preference first
+        # Try user preference first (including dynamically discovered models)
         user_models = self.user_config.get("models", {})
         preferred_model = user_models.get(provider)
         
-        if preferred_model and preferred_model in available_models:
-            self.current_model = preferred_model
-            return preferred_model
+        if preferred_model:
+            # Check if it's in static config first
+            available_models = self.get_available_models(provider)
+            if preferred_model in available_models:
+                self.current_model = preferred_model
+                return preferred_model
+            
+            # If not in static config, validate it exists via dynamic discovery
+            try:
+                from .services.model_service import ModelService
+                model_service = ModelService(self)
+                discovery_result = model_service._discover_provider_models(provider)
+                
+                if discovery_result.success:
+                    discovered_models = [m.get('id', m.get('name', '')) for m in discovery_result.models]
+                    if preferred_model in discovered_models:
+                        self.current_model = preferred_model
+                        return preferred_model
+            except ImportError:
+                # Model service not available, can't validate dynamic models
+                pass
+        
+        # Fallback to static models
+        available_models = self.get_available_models(provider)
+        if not available_models:
+            return "gpt-4o-mini"  # Final fallback
         
         # Return first available model
         self.current_model = available_models[0]
@@ -388,9 +406,27 @@ class EnhancedConfig:
         if not provider:
             return False
         
+        # Check if model is available in static config
         available_models = self.get_available_models(provider)
-        if model_name not in available_models:
-            return False
+        model_available_statically = model_name in available_models
+        
+        # If not in static config, try dynamic discovery
+        if not model_available_statically:
+            try:
+                from .services.model_service import ModelService
+                model_service = ModelService(self)
+                discovery_result = model_service._discover_provider_models(provider)
+                
+                if discovery_result.success:
+                    discovered_models = [m.get('id', m.get('name', '')) for m in discovery_result.models]
+                    if model_name not in discovered_models:
+                        return False  # Model not found even in dynamic discovery
+                else:
+                    return False  # Discovery failed, can't validate model
+            except ImportError:
+                # Model service not available, stick to static validation
+                if not model_available_statically:
+                    return False
         
         # Update runtime state
         self.current_model = model_name
