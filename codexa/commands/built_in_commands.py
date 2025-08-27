@@ -204,7 +204,9 @@ class ModelCommand(Command):
     
     async def execute(self, context: CommandContext) -> str:
         action = context.parsed_args.get("action")
-        args = context.parsed_args.get("args", [])
+        # Skip the first arg since it's mapped to the action parameter
+        raw_args = context.parsed_args.get("args", [])
+        args = raw_args[1:] if raw_args and len(raw_args) > 0 else []
         
         if not context.config:
             return "[red]Configuration not available[/red]"
