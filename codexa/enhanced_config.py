@@ -276,6 +276,15 @@ class EnhancedConfig:
     def _initialize_mcp_servers(self) -> Dict[str, MCPServerConfig]:
         """Initialize MCP server configurations."""
         return {
+            "filesystem": MCPServerConfig(
+                name="filesystem",
+                command=["mcp-filesystem-server"],
+                args=["/home/mike/codexa", "/tmp", "/var/tmp", str(Path.cwd())],  # Allow current directory and common paths
+                enabled=True,  # Always enabled by default for core filesystem operations
+                capabilities=["filesystem", "file_operations", "directory_operations", "file_search"],
+                priority=10,  # High priority for core operations
+                timeout=60  # Longer timeout for filesystem operations
+            ),
             "context7": MCPServerConfig(
                 name="context7",
                 command=["npx", "-y", "@modelcontextprotocol/server-context7"],
@@ -425,7 +434,35 @@ class EnhancedConfig:
     
     def get_mcp_servers(self) -> Dict[str, MCPServerConfig]:
         """Get enabled MCP server configurations."""
+        # Always ensure filesystem server is properly configured
+        self.ensure_filesystem_server_enabled()
         return {k: v for k, v in self.mcp_servers.items() if v.enabled}
+    
+    def ensure_filesystem_server_enabled(self) -> bool:
+        """Ensure the MCP filesystem server is enabled and properly configured."""
+        try:
+            if "filesystem" in self.mcp_servers:
+                # Update args to include current working directory
+                fs_server = self.mcp_servers["filesystem"]
+                current_dir = str(Path.cwd())
+                
+                # Ensure current directory is in allowed paths
+                if current_dir not in fs_server.args:
+                    fs_server.args.append(current_dir)
+                
+                # Ensure it's enabled
+                fs_server.enabled = True
+                
+                # Update user config to persist this
+                user_mcp = self.user_config.setdefault("mcp_servers", {})
+                user_mcp.setdefault("filesystem", {})["enabled"] = True
+                
+                return True
+            return False
+        except Exception as e:
+            # Use print instead of logger to avoid circular imports
+            print(f"Warning: Failed to ensure filesystem server enabled: {e}")
+            return False
     
     def enable_feature(self, feature_name: str, enabled: bool = True):
         """Enable/disable a feature."""

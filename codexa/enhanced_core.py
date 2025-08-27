@@ -154,6 +154,20 @@ class EnhancedCodexaAgent:
         except Exception as e:
             self.logger.warning(f"Search system not available: {e}")
             self.search_manager = None
+        
+        # Filesystem operations with MCP integration
+        from .filesystem import FilesystemOperations, MCPFileSystem
+        self.filesystem_ops = FilesystemOperations(self.config)
+        self.mcp_filesystem = None
+        
+        # Initialize MCP filesystem if MCP service is available
+        if self.mcp_service:
+            try:
+                self.mcp_filesystem = MCPFileSystem(self.mcp_service)
+                self.filesystem_ops.mcp_filesystem = self.mcp_filesystem
+                self.logger.info("MCP Filesystem integration initialized")
+            except Exception as e:
+                self.logger.warning(f"MCP Filesystem integration failed: {e}")
 
         # Legacy managers for compatibility
         self.planning_manager = PlanningManager(self.codexa_dir, self.provider)
