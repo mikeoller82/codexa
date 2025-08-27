@@ -567,3 +567,52 @@ MCP servers enhance Codexa with specialized capabilities:
             "recent_requests": len([req for req in self.help_request_history 
                                   if (datetime.now() - req[1]).hours < 24])
         }
+    
+    async def show_main_help(self, **kwargs):
+        """Show main help information with contextual assistance."""
+        from rich.panel import Panel
+        
+        # Extract context information
+        current_context = kwargs.get('current_context', {})
+        available_commands = kwargs.get('available_commands', [])
+        mcp_servers = kwargs.get('mcp_servers', [])
+        
+        # Show main help panel
+        help_content = """Welcome to Codexa! 🚀
+
+[bold cyan]Getting Started:[/bold cyan]
+• Type your coding questions or requests in natural language
+• Use slash commands like /help, /status, /config for specific functions
+• Type 'exit' or 'quit' to leave
+
+[bold cyan]Features Available:[/bold cyan]
+• Natural language code assistance
+• File generation and modification
+• Project analysis and suggestions
+• Interactive help system"""
+        
+        if available_commands:
+            help_content += f"\n\n[bold cyan]Available Commands:[/bold cyan]\n"
+            help_content += ", ".join(f"/{cmd}" for cmd in available_commands[:10])
+            if len(available_commands) > 10:
+                help_content += f" ... and {len(available_commands) - 10} more"
+        
+        if mcp_servers:
+            help_content += f"\n\n[bold cyan]Active MCP Servers:[/bold cyan]\n"
+            help_content += ", ".join(mcp_servers)
+        
+        help_panel = Panel(
+            help_content,
+            title="[bold green]Codexa Assistant Help[/bold green]",
+            border_style="green",
+            padding=(1, 2)
+        )
+        
+        self.console.print(help_panel)
+        
+        # Show contextual suggestions if we have query context
+        if current_context:
+            suggestions = self.get_contextual_help("help", context=current_context)
+            if suggestions:
+                self.console.print("\n[bold cyan]💡 Based on your current context:[/bold cyan]")
+                self.display_help(suggestions, limit=3)
