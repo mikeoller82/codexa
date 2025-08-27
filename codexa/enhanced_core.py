@@ -870,7 +870,7 @@ Enhanced features require proper API keys and MCP server configurations.
             try:
                 # UI component generation
                 if any(keyword in request.lower() for keyword in ["component", "ui", "interface"]):
-                    result = asyncio.run(self.mcp_service.generate_ui_component(request))
+                    result = await self.mcp_service.generate_ui_component(request)
                     if result:
                         console.print(f"[green]✅ Enhanced UI component generated![/green]")
                         console.print(f"[bold green]MCP Result:[/bold green]")
