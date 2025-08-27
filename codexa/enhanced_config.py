@@ -353,16 +353,28 @@ class EnhancedConfig:
         return []
     
     def switch_provider(self, provider_name: str) -> bool:
-        """Switch to different provider."""
+        """Switch to different provider and persist the selection."""
         if not self.is_provider_available(provider_name):
             return False
         
+        # Update runtime state
         self.current_provider = provider_name
         self.current_model = None  # Reset model selection
-        return True
+        
+        # Persist to user config
+        try:
+            self.user_config["provider"] = provider_name
+            self.save_config()
+            return True
+        except Exception as e:
+            # If saving fails, still update runtime state but report the issue
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to save provider selection to config: {e}")
+            return False
     
     def switch_model(self, model_name: str, provider: Optional[str] = None) -> bool:
-        """Switch to different model."""
+        """Switch to different model and persist the selection."""
         provider = provider or self.current_provider
         if not provider:
             return False
@@ -371,8 +383,30 @@ class EnhancedConfig:
         if model_name not in available_models:
             return False
         
+        # Update runtime state
         self.current_model = model_name
-        return True
+        
+        # Persist to user config
+        try:
+            if "models" not in self.user_config:
+                self.user_config["models"] = {}
+            
+            self.user_config["models"][provider] = model_name
+            
+            # Also update provider if it changed
+            if provider != self.current_provider:
+                self.current_provider = provider
+                self.user_config["provider"] = provider
+            
+            # Save the config immediately
+            self.save_config()
+            return True
+        except Exception as e:
+            # If saving fails, still update runtime state but report the issue
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to save model selection to config: {e}")
+            return False
     
     def get_model_config(self, model_name: str, provider: Optional[str] = None) -> Optional[ModelConfig]:
         """Get detailed model configuration."""

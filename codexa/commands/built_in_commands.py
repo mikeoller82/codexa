@@ -155,9 +155,9 @@ class ProviderCommand(Command):
             success = context.config.switch_provider(provider_name)
             
             if success:
-                return f"[green]Switched to provider: {provider_name}[/green]"
+                return f"[green]✓ Successfully switched to and saved provider: {provider_name}[/green]"
             else:
-                return f"[red]Failed to switch to provider: {provider_name}[/red]"
+                return f"[red]✗ Failed to switch to provider: {provider_name}[/red]\n[dim]Check if the provider is available and has a valid API key[/dim]"
         
         elif action == "status":
             current_provider = context.config.get_provider()
@@ -295,9 +295,9 @@ class ModelCommand(Command):
                     if hasattr(context.config, 'switch_model'):
                         success = context.config.switch_model(model_name, provider)
                         if success:
-                            return f"[green]Selected and switched to: {model_name} ({provider})[/green]"
+                            return f"[green]✓ Successfully selected and saved: {model_name} ({provider})[/green]"
                         else:
-                            return f"[yellow]Selected {model_name} ({provider}) but failed to update config[/yellow]"
+                            return f"[red]✗ Selected {model_name} ({provider}) but failed to save configuration[/red]\n[dim]The model is active for this session but won't persist[/dim]"
                     else:
                         return f"[yellow]Selected: {model_name} ({provider}) - Manual config update needed[/yellow]"
                 else:
@@ -314,6 +314,10 @@ class ModelCommand(Command):
             
             if hasattr(context.config, 'switch_model'):
                 success = context.config.switch_model(model_name, provider)
+                if success:
+                    return f"[green]✓ Successfully switched to and saved: {model_name}{f' ({provider})' if provider else ''}[/green]"
+                else:
+                    return f"[red]✗ Failed to switch to model: {model_name}[/red]\n[dim]Check if the model exists for the provider[/dim]"
             else:
                 # Fallback for basic config
                 success = False
@@ -321,14 +325,16 @@ class ModelCommand(Command):
                     try:
                         current_provider = provider or context.config.get_provider()
                         context.config.user_config.setdefault('models', {})[current_provider] = model_name
+                        if hasattr(context.config, 'save_config'):
+                            context.config.save_config()
                         success = True
                     except Exception:
                         pass
-            
-            if success:
-                return f"[green]Switched to model: {model_name}{f' ({provider})' if provider else ''}[/green]"
-            else:
-                return f"[red]Failed to switch to model: {model_name}[/red]"
+                
+                if success:
+                    return f"[green]Switched to model: {model_name}{f' ({provider})' if provider else ''}[/green]"
+                else:
+                    return f"[red]Failed to switch to model: {model_name}[/red]"
         
         elif action == "info":
             model_name = args[0] if args else context.config.get_model()
