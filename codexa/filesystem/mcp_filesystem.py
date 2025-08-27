@@ -42,11 +42,14 @@ class MCPFileSystem:
         """
         try:
             result = await self.mcp_service.query_server(
-                f"read_file",
+                "read_file",
                 preferred_server=self.server_name,
-                context={"path": str(path), "operation": "read_file"}
+                context={"path": str(path)}
             )
-            return result.get("content", "")
+            # Parse MCP tool response format
+            if result and "content" in result and result["content"]:
+                return result["content"][0].get("text", "")
+            return ""
         except Exception as e:
             self.logger.error(f"Failed to read file {path}: {e}")
             raise MCPError(f"Cannot read file {path}: {e}")
@@ -391,11 +394,29 @@ class MCPFileSystem:
         """
         try:
             result = await self.mcp_service.query_server(
-                f"get_file_info",
+                "get_file_info",
                 preferred_server=self.server_name,
-                context={"path": str(path), "operation": "get_file_info"}
+                context={"path": str(path)}
             )
-            return result.get("info", {})
+            # Parse MCP tool response format
+            if result and "content" in result and result["content"]:
+                text = result["content"][0].get("text", "")
+                # Parse file info from text
+                info = {}
+                for line in text.split('\n'):
+                    if ':' in line and not line.startswith('File information'):
+                        key, value = line.split(':', 1)
+                        key = key.strip().lower().replace(' ', '_')
+                        value = value.strip()
+                        info[key] = value
+                        # Convert size to bytes if available
+                        if key == 'size' and 'bytes' in value:
+                            try:
+                                info['size'] = int(value.split()[0])
+                            except:
+                                pass
+                return info
+            return {}
         except Exception as e:
             self.logger.error(f"Failed to get file info for {path}: {e}")
             raise MCPError(f"Cannot get file info for {path}: {e}")
@@ -412,11 +433,23 @@ class MCPFileSystem:
         """
         try:
             result = await self.mcp_service.query_server(
-                f"list_allowed_directories",
+                "list_allowed_directories",
                 preferred_server=self.server_name,
-                context={"operation": "list_allowed_directories"}
+                context={}
             )
-            return result.get("directories", [])
+            # Parse MCP tool response format
+            if result and "content" in result and result["content"]:
+                text = result["content"][0].get("text", "")
+                # Extract directories from text response
+                directories = []
+                for line in text.split('\n'):
+                    if line.strip() and 'file://' in line:
+                        # Extract path from "path (file://path)" format
+                        parts = line.split(' (file://')
+                        if parts:
+                            directories.append(parts[0].strip())
+                return directories
+            return []
         except Exception as e:
             self.logger.error(f"Failed to list allowed directories: {e}")
             raise MCPError(f"Cannot list allowed directories: {e}")

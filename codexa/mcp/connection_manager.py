@@ -65,6 +65,9 @@ class MCPConnection:
         
         # Logging
         self.logger = logging.getLogger(f"mcp.{config.name}")
+        
+        # Message reading task
+        self._read_task = None
     
     async def connect(self) -> bool:
         """Establish connection to MCP server."""
@@ -85,6 +88,9 @@ class MCPConnection:
                 text=True,
                 env=self.config.env
             )
+            
+            # Start message reading loop
+            self._read_task = asyncio.create_task(self._message_read_loop())
             
             # Initialize MCP protocol
             if await self._initialize():
@@ -139,7 +145,11 @@ class MCPConnection:
                 self.metrics.last_request_time = datetime.now()
                 self._update_average_response_time(response_time)
                 
-                return response
+                # Return the result from the MCPMessage, handling errors
+                if response.error:
+                    raise MCPError(f"Server error: {response.error}")
+                
+                return response.result
                 
             except asyncio.TimeoutError:
                 self.metrics.failed_requests += 1
@@ -209,6 +219,35 @@ class MCPConnection:
             self.logger.error(f"Failed to read message: {e}")
             return None
     
+    async def _message_read_loop(self):
+        """Async message reading loop to handle responses from the server."""
+        try:
+            while self.process and self.process.poll() is None:
+                try:
+                    # Use asyncio to read from stdout without blocking
+                    loop = asyncio.get_event_loop()
+                    line = await loop.run_in_executor(None, self.process.stdout.readline)
+                    
+                    if not line:
+                        break
+                        
+                    message = MCPMessage.from_json(line.strip())
+                    if message and hasattr(message, 'id') and message.id in self.pending_requests:
+                        # Complete the pending request
+                        future = self.pending_requests.pop(message.id)
+                        if not future.done():
+                            future.set_result(message)
+                    
+                except Exception as e:
+                    self.logger.error(f"Error in message read loop: {e}")
+                    break
+                    
+        except asyncio.CancelledError:
+            pass  # Task cancelled, exit gracefully
+        except Exception as e:
+            self.logger.error(f"Message read loop failed: {e}")
+            self.state = ConnectionState.ERROR
+    
     def _update_average_response_time(self, response_time: float):
         """Update average response time metric."""
         total = self.metrics.total_requests
@@ -217,6 +256,14 @@ class MCPConnection:
     
     async def _cleanup(self):
         """Clean up connection resources."""
+        # Cancel read task
+        if hasattr(self, '_read_task') and self._read_task:
+            self._read_task.cancel()
+            try:
+                await self._read_task
+            except asyncio.CancelledError:
+                pass
+        
         if self.process:
             try:
                 self.process.terminate()

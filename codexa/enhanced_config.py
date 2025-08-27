@@ -278,12 +278,12 @@ class EnhancedConfig:
         return {
             "filesystem": MCPServerConfig(
                 name="filesystem",
-                command=["mcp-filesystem-server"],
+                command=["/home/mike/go/bin/mcp-filesystem-server"],
                 args=["/home/mike/codexa", "/tmp", "/var/tmp", str(Path.cwd())],  # Allow current directory and common paths
                 enabled=True,  # Always enabled by default for core filesystem operations
                 capabilities=["filesystem", "file_operations", "directory_operations", "file_search"],
                 priority=10,  # High priority for core operations
-                timeout=60  # Longer timeout for filesystem operations
+                timeout=10  # Reasonable timeout for filesystem operations
             ),
             "context7": MCPServerConfig(
                 name="context7",

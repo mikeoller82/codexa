@@ -128,9 +128,12 @@ class MCPService:
         try:
             start_time = datetime.now()
             
-            # Send request to server
+            # Send request to server using tools/call method
             result = await self.connection_manager.send_request(
-                server_name, "query", {"request": request, "context": context}
+                server_name, "tools/call", {
+                    "name": request,
+                    "arguments": context
+                }
             )
             
             # Update performance metrics
