@@ -1,0 +1,30 @@
+{
+    "name": "code_quality",
+    "version": "1.0.0",
+    "description": "Code quality analysis, linting, and formatting plugin",
+    "author": "Codexa Team",
+    "homepage": "https://github.com/codexa-dev/codexa",
+    "license": "MIT",
+    "dependencies": ["black", "isort", "pylint", "mypy"],
+    "capabilities": [
+        "code_analysis",
+        "code_formatting",
+        "linting",
+        "type_checking",
+        "complexity_analysis"
+    ],
+    "permissions": [
+        "file_read",
+        "file_write",
+        "process_execute"
+    ],
+    "mcp_servers": [],
+    "commands": [
+        "lint",
+        "format", 
+        "complexity",
+        "quality-check",
+        "fix-quality"
+    ],
+    "min_codexa_version": "1.0.0"
+}

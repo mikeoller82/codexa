@@ -489,6 +489,46 @@ class PluginManager:
             self.logger.error(f"Failed to initialize plugin system: {e}")
             return False
 
+    async def cleanup_plugins(self) -> bool:
+        """Clean up all plugins during application shutdown."""
+        self.logger.info("Starting plugin cleanup...")
+        success = True
+        
+        try:
+            # Get list of all plugin names to avoid modification during iteration
+            plugin_names = list(self.plugins.keys())
+            
+            # Disable all enabled plugins first
+            for name in plugin_names:
+                try:
+                    if self.plugins[name].enabled:
+                        self.logger.debug(f"Disabling plugin: {name}")
+                        await self.disable_plugin(name)
+                except Exception as e:
+                    self.logger.error(f"Failed to disable plugin {name} during cleanup: {e}")
+                    success = False
+            
+            # Unload all plugins
+            for name in plugin_names.copy():  # Use copy to avoid modification during iteration
+                try:
+                    self.logger.debug(f"Unloading plugin: {name}")
+                    await self.unload_plugin(name)
+                except Exception as e:
+                    self.logger.error(f"Failed to unload plugin {name} during cleanup: {e}")
+                    success = False
+            
+            # Clear any remaining data structures
+            self.plugins.clear()
+            self.plugin_infos.clear()
+            self.sandbox_policies.clear()
+            
+            self.logger.info(f"Plugin cleanup completed {'successfully' if success else 'with errors'}")
+            return success
+            
+        except Exception as e:
+            self.logger.error(f"Critical error during plugin cleanup: {e}")
+            return False
+
     def get_plugin_stats(self) -> Dict[str, Any]:
         """Get plugin manager statistics."""
         return {

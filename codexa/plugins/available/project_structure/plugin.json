@@ -1,0 +1,29 @@
+{
+    "name": "project_structure",
+    "version": "1.0.0",
+    "description": "Project scaffolding, templates, and structure analysis plugin",
+    "author": "Codexa Team",
+    "homepage": "https://github.com/codexa-dev/codexa",
+    "license": "MIT",
+    "dependencies": [],
+    "capabilities": [
+        "project_scaffolding",
+        "template_management",
+        "structure_analysis",
+        "project_initialization",
+        "best_practices"
+    ],
+    "permissions": [
+        "file_read",
+        "file_write"
+    ],
+    "mcp_servers": [],
+    "commands": [
+        "scaffold",
+        "template",
+        "structure-analyze",
+        "project-init",
+        "best-practices"
+    ],
+    "min_codexa_version": "1.0.0"
+}

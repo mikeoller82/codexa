@@ -1,0 +1,31 @@
+{
+    "name": "git_integration",
+    "version": "1.0.0",
+    "description": "Enhanced Git integration with smart operations and analysis",
+    "author": "Codexa Team",
+    "homepage": "https://github.com/codexa-dev/codexa",
+    "license": "MIT",
+    "dependencies": ["gitpython"],
+    "capabilities": [
+        "git_operations",
+        "branch_management",
+        "commit_analysis",
+        "conflict_resolution",
+        "repository_insights"
+    ],
+    "permissions": [
+        "file_read",
+        "file_write",
+        "process_execute"
+    ],
+    "mcp_servers": [],
+    "commands": [
+        "git-status",
+        "commit-smart",
+        "branch-manage",
+        "git-analyze",
+        "conflict-assist",
+        "repo-insights"
+    ],
+    "min_codexa_version": "1.0.0"
+}

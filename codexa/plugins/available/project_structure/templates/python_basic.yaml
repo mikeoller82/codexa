@@ -1,0 +1,41 @@
+name: "Python Basic Project"
+description: "Basic Python project structure with best practices"
+language: "python"
+version: "1.0.0"
+
+structure:
+  directories:
+    - "src/"
+    - "tests/"
+    - "docs/"
+    - "scripts/"
+    - ".github/workflows/"
+  
+  files:
+    - path: "requirements.txt"
+      template: "python_requirements"
+    - path: "requirements-dev.txt"
+      template: "python_dev_requirements"
+    - path: "setup.py"
+      template: "python_setup"
+    - path: "pyproject.toml"
+      template: "python_pyproject"
+    - path: "README.md"
+      template: "python_readme"
+    - path: ".gitignore"
+      template: "python_gitignore"
+    - path: "src/__init__.py"
+      template: "python_init"
+    - path: "tests/__init__.py"
+      template: "python_init"
+    - path: "tests/test_basic.py"
+      template: "python_test_basic"
+    - path: ".github/workflows/ci.yml"
+      template: "python_github_ci"
+
+variables:
+  project_name: "my_project"
+  project_description: "A Python project"
+  author_name: "Your Name"
+  author_email: "your.email@example.com"
+  python_version: "3.8"
