@@ -37,24 +37,42 @@ class DeleteFileTool(Tool):
         """Check if this tool can handle the request."""
         request_lower = request.lower()
         
-        # High confidence for explicit delete requests
-        if any(phrase in request_lower for phrase in [
-            "delete file", "delete directory", "remove file", "remove directory",
-            "delete", "rm ", "del ", "remove"
+        # High confidence for explicit delete requests with file/directory context
+        import re
+        if any(re.search(pattern, request_lower) for pattern in [
+            r'\bdelete\s+file\b', r'\bdelete\s+directory\b', 
+            r'\bremove\s+file\b', r'\bremove\s+directory\b',
+            r'\brm\s+', r'\bdel\s+'
         ]):
             return 0.9
+            
+        # Medium confidence for delete with file path context
+        if ("delete" in request_lower or "remove" in request_lower) and (
+            "/" in request or "\\" in request or 
+            any(ext in request_lower for ext in [".py", ".js", ".txt", ".md", ".json", ".yml", ".yaml"]) or
+            context.get_state("file_path")
+        ):
+            return 0.7
         
-        # Medium confidence for cleanup requests
+        # Lower confidence for cleanup requests
         if any(phrase in request_lower for phrase in [
             "clean up", "cleanup", "clear"
         ]):
-            return 0.5
+            return 0.3
         
+        # Do not handle generic requests
         return 0.0
     
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute file/directory deletion."""
         try:
+            # Early validation - should not be called for inappropriate requests
+            if not self._is_valid_delete_request(context.user_request, context):
+                return ToolResult.error_result(
+                    error="This tool should not handle this type of request",
+                    tool_name=self.name
+                )
+            
             # Get parameters from context
             file_path = context.get_state("file_path")
             recursive = context.get_state("recursive", False)
@@ -67,7 +85,7 @@ class DeleteFileTool(Tool):
             
             if not file_path:
                 return ToolResult.error_result(
-                    error="No file path specified",
+                    error="No file path specified for deletion",
                     tool_name=self.name
                 )
             
@@ -182,3 +200,24 @@ class DeleteFileTool(Tool):
                 continue
         
         return False
+    
+    def _is_valid_delete_request(self, request: str, context: ToolContext) -> bool:
+        """Validate that this is actually a delete request that should be handled by this tool."""
+        if not request:
+            return False
+            
+        request_lower = request.lower()
+        
+        # Must contain explicit delete/remove terms
+        if not any(term in request_lower for term in ["delete", "remove", "rm ", "del ", "cleanup", "clean"]):
+            return False
+        
+        # Should have file/directory context indicators
+        has_path_indicators = (
+            "/" in request or "\\" in request or  # Path separators
+            any(ext in request_lower for ext in [".py", ".js", ".txt", ".md", ".json", ".yml", ".yaml"]) or  # File extensions
+            context.get_state("file_path") or  # Explicit file path in context
+            any(term in request_lower for term in ["file", "directory", "folder"])  # File/directory keywords
+        )
+        
+        return has_path_indicators

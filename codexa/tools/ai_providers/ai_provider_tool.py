@@ -55,15 +55,22 @@ class AIProviderTool(Tool):
         request_lower = request.lower()
         confidence = 0.0
         
+        # High confidence for explicit AI/model requests
+        if any(phrase in request_lower for phrase in [
+            "/model select", "model select", "select model", "switch model",
+            "ai provider", "provider", "change provider", "switch provider"
+        ]):
+            return 0.9
+            
         # Medium confidence for general AI requests
         ai_keywords = ["ai", "gpt", "claude", "llm", "model", "generate", "ask ai"]
         for keyword in ai_keywords:
             if keyword in request_lower:
-                confidence = max(confidence, 0.5)
+                confidence = max(confidence, 0.6)
         
-        # Lower confidence as fallback for unhandled AI requests
-        if any(word in request_lower for word in ["create", "generate", "explain", "analyze"]):
-            confidence = max(confidence, 0.2)
+        # Higher confidence as fallback for general requests when no other tools match
+        if any(word in request_lower for word in ["create", "generate", "explain", "analyze", "help", "fix"]):
+            confidence = max(confidence, 0.4)
         
         return confidence
     
