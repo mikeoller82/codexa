@@ -130,3 +130,18 @@ class ThemeManager:
         """Style text with appropriate secondary color for visibility."""
         secondary_color = self.get_secondary_color(theme)
         return f"[{secondary_color}]{text}[/{secondary_color}]"
+    
+    def get_dim_style(self, theme: Optional[ColorTheme] = None) -> str:
+        """Get appropriate dim style for the current theme."""
+        theme = theme or self.current_theme
+        
+        # For light themes, use a dark blue instead of dim (gray)
+        if theme == ColorTheme.LIGHT:
+            return "blue4"  # Dark blue, visible on light backgrounds
+        else:
+            return "dim"  # Standard dim for dark backgrounds
+    
+    def style_dim_text(self, text: str, theme: Optional[ColorTheme] = None) -> str:
+        """Style text with appropriate dim color for visibility on any background."""
+        dim_style = self.get_dim_style(theme)
+        return f"[{dim_style}]{text}[/{dim_style}]"

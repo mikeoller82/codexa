@@ -20,6 +20,10 @@ from .tools.base.tool_manager import ToolManager
 from .tools.base.tool_registry import ToolRegistry  
 from .tools.base.tool_interface import ToolContext
 
+# Command system
+from .commands.command_registry import CommandRegistry
+from .commands.built_in_commands import BuiltInCommands
+
 # Configuration and providers
 from .enhanced_config import EnhancedConfig
 from .enhanced_providers import EnhancedProviderFactory
@@ -68,6 +72,10 @@ class EnhancedCodexaAgent:
         # Tool-based architecture - the heart of the new system
         self.tool_registry = ToolRegistry()
         self.tool_manager = ToolManager(registry=self.tool_registry, auto_discover=False, enable_performance_monitoring=True)
+        
+        # Command system
+        self.command_registry = CommandRegistry()
+        BuiltInCommands.register_all(self.command_registry)
         
         # Initialize tools
         self._initialize_tools()
