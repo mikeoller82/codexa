@@ -596,23 +596,46 @@ class ToolManager:
             )
     
     def _format_coordination_output(self, coordination_result) -> str:
-        """Format coordination results for display."""
+        """Format coordination results for display - focus on user-facing content."""
+        # Extract the actual user response from tool results
+        user_response = self._extract_user_response(coordination_result.tool_results)
+        if user_response:
+            return user_response
+        
+        # Fallback to simple tool outputs if no clear user response
         output_parts = []
-        
-        # Add execution summary
-        output_parts.append(f"**Coordination Summary:**")
-        output_parts.append(f"- Tools executed: {len(coordination_result.successful_tools)}/{len(coordination_result.tool_results)}")
-        output_parts.append(f"- Execution order: {' → '.join(coordination_result.execution_order)}")
-        output_parts.append(f"- Parallel efficiency: {coordination_result.parallel_efficiency:.1%}")
-        output_parts.append(f"- Total time: {coordination_result.total_execution_time:.3f}s")
-        
-        # Add tool outputs
         for tool_name in coordination_result.execution_order:
             result = coordination_result.tool_results.get(tool_name)
             if result and result.success and result.output:
-                output_parts.append(f"**{tool_name}:**\n{result.output}")
+                output_parts.append(result.output)
         
-        return "\n\n".join(output_parts) if output_parts else None
+        return "\n\n".join(output_parts) if output_parts else "Task completed successfully."
+    
+    def _extract_user_response(self, tool_results: dict) -> str:
+        """Extract clean user-facing response from tool results."""
+        for tool_name, tool_result in tool_results.items():
+            if not tool_result or not tool_result.success:
+                continue
+            
+            # Check for conversational response in data
+            if hasattr(tool_result, 'data') and isinstance(tool_result.data, dict):
+                data = tool_result.data
+                if 'response' in data and isinstance(data['response'], str):
+                    return data['response']
+                elif 'message' in data and isinstance(data['message'], str):
+                    return data['message']
+            
+            # Check for direct output
+            if hasattr(tool_result, 'output') and tool_result.output:
+                output = str(tool_result.output).strip()
+                # Avoid generic or technical outputs
+                if output and not any(phrase in output.lower() for phrase in [
+                    'coordination summary', 'tools executed', 'execution order', 
+                    'parallel efficiency', 'total time', '→'
+                ]):
+                    return output
+        
+        return None
     
     def get_coordination_stats(self) -> Optional[Dict[str, Any]]:
         """Get coordination statistics."""

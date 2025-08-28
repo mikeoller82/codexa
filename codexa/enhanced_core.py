@@ -197,14 +197,22 @@ class EnhancedCodexaAgent:
                 )
             
             if result.success:
-                # Display result
-                console.print("\n[bold green]Codexa:[/bold green]")
+                # Display result - no need for "Codexa:" prefix in most cases
                 if result.data:
                     # Format the result based on type
                     if isinstance(result.data, dict):
                         self._display_structured_result(result.data)
                     else:
-                        console.print(Markdown(str(result.data)))
+                        clean_message = str(result.data).strip()
+                        if clean_message and not clean_message.startswith('Task completed'):
+                            console.print(clean_message)
+                        else:
+                            console.print("[dim]Task completed.[/dim]")
+                else:
+                    # Show clean output or error from result
+                    message = self._format_result_message(result)
+                    if message and message.strip():
+                        console.print(message)
                 
                 # Save successful interactions to history
                 self.history.append({
@@ -215,7 +223,8 @@ class EnhancedCodexaAgent:
                 })
                 
             else:
-                console.print(f"[red]Request failed: {self._format_result_message(result)}[/red]")
+                error_message = self._format_result_message(result)
+                console.print(f"[red]Request failed: {error_message}[/red]")
                 if result.data and isinstance(result.data, dict) and 'error' in result.data:
                     console.print(f"[dim]Details: {result.data['error']}[/dim]")
         
@@ -225,7 +234,15 @@ class EnhancedCodexaAgent:
     
     def _display_structured_result(self, data: dict):
         """Display structured result data in a user-friendly format."""
-        if 'code' in data:
+        # Handle coordination results first - these are the most common now
+        if 'coordination_result' in data:
+            self._display_coordination_result(data['coordination_result'])
+            return
+        elif 'tool_results' in data and 'successful_tools' in data:
+            # Direct coordination data
+            self._display_tool_results(data['tool_results'])
+            return
+        elif 'code' in data:
             # Code generation result
             console.print(f"[green]✅ {data.get('generation_type', 'Code')} generated![/green]")
             if 'language' in data:
@@ -248,14 +265,81 @@ class EnhancedCodexaAgent:
             # Simple message result
             console.print(data['message'])
         else:
-            # Generic structured data
-            console.print(Markdown(f"```json\n{data}\n```"))
+            # Generic structured data - avoid dumping raw objects
+            clean_message = self._extract_clean_message(data)
+            if clean_message:
+                console.print(clean_message)
+            else:
+                console.print("[dim]Task completed successfully.[/dim]")
+
+    def _display_coordination_result(self, coordination_result):
+        """Display coordination result in a clean, user-friendly way."""
+        if hasattr(coordination_result, 'tool_results'):
+            self._display_tool_results(coordination_result.tool_results)
+        else:
+            # Fallback for unexpected coordination result format
+            console.print("[dim]Task completed.[/dim]")
+    
+    def _display_tool_results(self, tool_results: dict):
+        """Extract and display clean responses from tool results."""
+        for tool_name, tool_result in tool_results.items():
+            clean_response = self._extract_tool_response(tool_result)
+            if clean_response:
+                console.print(clean_response)
+                return  # Only show the first meaningful response
+        
+        # If no clean response found, show generic success
+        console.print("[dim]Task completed successfully.[/dim]")
+    
+    def _extract_tool_response(self, tool_result) -> str:
+        """Extract clean, user-facing response from a tool result."""
+        if not tool_result or not hasattr(tool_result, 'success') or not tool_result.success:
+            return None
+        
+        # Check for conversational response in data
+        if hasattr(tool_result, 'data') and isinstance(tool_result.data, dict):
+            data = tool_result.data
+            if 'response' in data:
+                return str(data['response'])
+            elif 'message' in data:
+                return str(data['message'])
+            elif 'output' in data:
+                return str(data['output'])
+        
+        # Check for direct output
+        if hasattr(tool_result, 'output') and tool_result.output:
+            return str(tool_result.output)
+        
+        return None
+    
+    def _extract_clean_message(self, data) -> str:
+        """Extract a clean message from complex data structures."""
+        # Handle nested data structures
+        if isinstance(data, dict):
+            # Look for common response fields
+            for key in ['response', 'message', 'output', 'content']:
+                if key in data:
+                    value = data[key]
+                    if isinstance(value, str) and value.strip():
+                        return value.strip()
+        
+        return None
 
     def _format_result_message(self, result: object) -> str:
         """Return a human-friendly string for a ToolResult-like object.
 
-        Prefer `output`, then `error`, then `data` (stringified).
+        Now handles coordination results properly.
         """
+        # Handle coordination results first
+        if hasattr(result, 'data') and isinstance(result.data, dict):
+            data = result.data
+            
+            # Handle coordination result data
+            if 'coordination_result' in data:
+                return self._extract_coordination_message(data['coordination_result'])
+            elif 'tool_results' in data:
+                return self._extract_tool_results_message(data['tool_results'])
+        
         # Prefer explicit output
         if hasattr(result, 'output') and result.output:
             return str(result.output)
@@ -269,16 +353,27 @@ class EnhancedCodexaAgent:
             d = result.data
             if isinstance(d, str):
                 return d
-            try:
-                return str(d)
-            except Exception:
-                return ''
+            # Try to extract clean message instead of dumping raw data
+            clean_msg = self._extract_clean_message(d)
+            if clean_msg:
+                return clean_msg
 
-        # Fallback
-        try:
-            return str(result)
-        except Exception:
-            return ''
+        # Fallback - avoid raw object dumps
+        return "Task completed."
+    
+    def _extract_coordination_message(self, coordination_result) -> str:
+        """Extract clean message from coordination result."""
+        if hasattr(coordination_result, 'tool_results'):
+            return self._extract_tool_results_message(coordination_result.tool_results)
+        return "Task completed."
+    
+    def _extract_tool_results_message(self, tool_results) -> str:
+        """Extract clean message from tool results."""
+        for tool_name, tool_result in tool_results.items():
+            clean_response = self._extract_tool_response(tool_result)
+            if clean_response:
+                return clean_response
+        return "Task completed."
 
     def initialize_project(self) -> None:
         """Initialize Codexa project using tool system where possible."""
