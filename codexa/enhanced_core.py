@@ -67,7 +67,7 @@ class EnhancedCodexaAgent:
         
         # Tool-based architecture - the heart of the new system
         self.tool_registry = ToolRegistry()
-        self.tool_manager = ToolManager(enable_performance_monitoring=True)
+        self.tool_manager = ToolManager(registry=self.tool_registry, auto_discover=False, enable_performance_monitoring=True)
         
         # Initialize tools
         self._initialize_tools()

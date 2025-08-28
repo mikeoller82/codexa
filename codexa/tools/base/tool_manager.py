@@ -48,11 +48,12 @@ class ToolManager:
     Provides intelligent routing and execution planning.
     """
     
-    def __init__(self, auto_discover: bool = True, enable_performance_monitoring: bool = True, enable_coordination: bool = True):
+    def __init__(self, registry: Optional[ToolRegistry] = None, auto_discover: bool = True, enable_performance_monitoring: bool = True, enable_coordination: bool = True):
         """
         Initialize tool manager.
         
         Args:
+            registry: Optional existing tool registry to use
             auto_discover: Whether to automatically discover tools
             enable_performance_monitoring: Whether to enable advanced performance monitoring
             enable_coordination: Whether to enable tool coordination and dependency resolution
@@ -60,7 +61,7 @@ class ToolManager:
         self.logger = logging.getLogger("codexa.tools.manager")
         
         # Core components
-        self.registry = ToolRegistry()
+        self.registry = registry if registry is not None else ToolRegistry()
         self.context_manager = ToolContextManager()
         self.request_analyzer = RequestAnalyzer()
         
