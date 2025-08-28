@@ -5,6 +5,7 @@ Enhanced feature tools for Codexa tool system.
 # Import all enhanced tools for auto-discovery
 from .performance_dashboard_tool import PerformanceDashboardTool
 from .dependency_demo_tool import DataValidatorTool, DataProcessorTool, ReportGeneratorTool, CoordinationDemoTool
+from .validation_testing_tool import ValidationTestingTool
 from .ascii_logo_tool import ASCIILogoTool
 from .animation_tool import AnimationTool
 from .theme_tool import ThemeTool
@@ -21,6 +22,7 @@ __all__ = [
     'DataProcessorTool', 
     'ReportGeneratorTool',
     'CoordinationDemoTool',
+    'ValidationTestingTool',
     'ASCIILogoTool',
     'AnimationTool',
     'ThemeTool',
