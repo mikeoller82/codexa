@@ -72,10 +72,14 @@ class ToolRegistry:
             if not self._validate_tool(temp_instance):
                 return False
             
-            # Check for name conflicts
+            # Handle name conflicts by preferring higher priority tools
             if temp_instance.name in self._tools:
-                self.logger.warning(f"Tool name conflict: {temp_instance.name}")
-                return False
+                existing_tool = self._tools[temp_instance.name]
+                if temp_instance.priority.value >= existing_tool.priority.value:
+                    self.logger.info(f"Tool name conflict resolved: {temp_instance.name} (replacing with higher/equal priority)")
+                else:
+                    self.logger.warning(f"Tool name conflict: {temp_instance.name} (keeping higher priority tool)")
+                    return False
             
             # Create tool info
             tool_info = ToolInfo(

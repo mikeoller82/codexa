@@ -172,7 +172,8 @@ class EnhancedCodexaAgent:
                 mcp_service=self.mcp_service,
                 config=self.config,
                 current_path=str(self.cwd),
-                history=self.history
+                history=self.history,
+                user_request=request
             )
             
             # Start performance tracking
