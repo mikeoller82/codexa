@@ -30,8 +30,9 @@ class RecoveryResult:
     """Result of a recovery attempt."""
     success: bool
     strategy_used: RecoveryStrategy
-    message: str
-    execution_time: float
+    error: Optional[str] = None
+    message: Optional[str] = None
+    execution_time: float = 0.0
     attempts: int = 1
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -88,7 +89,7 @@ class RecoveryManager:
             return RecoveryResult(
                 success=False,
                 strategy_used=RecoveryStrategy.MANUAL,
-                message="Circuit breaker open - manual intervention required",
+                error="Circuit breaker open - manual intervention required",
                 execution_time=0.0
             )
         
@@ -130,7 +131,7 @@ class RecoveryManager:
                     
                     return result
                 else:
-                    self.console.print(f"[yellow]⚠ {strategy.value} strategy failed: {result.message}[/yellow]")
+                    self.console.print(f"[yellow]⚠ {strategy.value} strategy failed: {result.error}[/yellow]")
                     self._update_success_rate(context, strategy, False)
             
             except Exception as e:
@@ -147,7 +148,7 @@ class RecoveryManager:
         failed_result = RecoveryResult(
             success=False,
             strategy_used=RecoveryStrategy.MANUAL,
-            message="All automated recovery strategies failed",
+            error="All automated recovery strategies failed",
             execution_time=execution_time,
             attempts=len(strategies)
         )
@@ -174,6 +175,7 @@ class RecoveryManager:
                 success=False,
                 strategy_used=strategy,
                 message=f"No handler available for strategy {strategy.value}",
+                error=f"No handler available for strategy {strategy.value}",
                 execution_time=0.0
             )
         
@@ -193,6 +195,7 @@ class RecoveryManager:
             success=False,
             strategy_used=strategy,
             message="All handlers for strategy failed",
+            error="All handlers for strategy failed",
             execution_time=0.0
         )
     

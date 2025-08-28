@@ -208,13 +208,13 @@ class EnhancedCodexaAgent:
                 # Save successful interactions to history
                 self.history.append({
                     "user": request,
-                    "assistant": result.message or str(result.data),
+                    "assistant": self._format_result_message(result) or str(result.data),
                     "timestamp": datetime.now().isoformat(),
                     "tools_used": getattr(result, 'tools_used', [])
                 })
                 
             else:
-                console.print(f"[red]Request failed: {result.message}[/red]")
+                console.print(f"[red]Request failed: {self._format_result_message(result)}[/red]")
                 if result.data and isinstance(result.data, dict) and 'error' in result.data:
                     console.print(f"[dim]Details: {result.data['error']}[/dim]")
         
@@ -249,6 +249,35 @@ class EnhancedCodexaAgent:
         else:
             # Generic structured data
             console.print(Markdown(f"```json\n{data}\n```"))
+
+    def _format_result_message(self, result: object) -> str:
+        """Return a human-friendly string for a ToolResult-like object.
+
+        Prefer `output`, then `error`, then `data` (stringified).
+        """
+        # Prefer explicit output
+        if hasattr(result, 'output') and result.output:
+            return str(result.output)
+
+        # Then error
+        if hasattr(result, 'error') and result.error:
+            return str(result.error)
+
+        # Then data (strings preferred)
+        if hasattr(result, 'data'):
+            d = result.data
+            if isinstance(d, str):
+                return d
+            try:
+                return str(d)
+            except Exception:
+                return ''
+
+        # Fallback
+        try:
+            return str(result)
+        except Exception:
+            return ''
 
     def initialize_project(self) -> None:
         """Initialize Codexa project using tool system where possible."""
