@@ -7,8 +7,31 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union, Callable
+from typing import Any, Dict, List, Optional, Set, Union, Callable, Tuple
 import logging
+try:
+    from packaging.version import Version
+except ImportError:
+    # Fallback if packaging is not available
+    class Version:
+        def __init__(self, version_str):
+            self.version_str = version_str
+        def __ge__(self, other):
+            return True
+        def __le__(self, other):
+            return True
+        def __gt__(self, other):
+            return True
+        def __lt__(self, other):
+            return True
+        def __eq__(self, other):
+            return True
+        @property
+        def major(self):
+            return 1
+        @property
+        def minor(self):
+            return 0
 
 
 class ToolStatus(Enum):
@@ -28,13 +51,125 @@ class ToolPriority(Enum):
     CRITICAL = 4
 
 
+class DependencyType(Enum):
+    """Tool dependency types."""
+    REQUIRED = "required"  # Must execute before this tool
+    OPTIONAL = "optional"  # Should execute before if available
+    CONFLICT = "conflict"  # Cannot execute with this tool
+    PROVIDES = "provides"  # This tool provides capabilities
+
+
+@dataclass
+class ToolDependency:
+    """Tool dependency specification."""
+    
+    name: str  # Tool name or capability
+    dependency_type: DependencyType
+    version_constraint: Optional[str] = None  # e.g., ">=1.0.0", "~1.2"
+    condition: Optional[str] = None  # Optional condition description
+    fallback_tools: List[str] = field(default_factory=list)  # Alternative tools
+    
+    def is_satisfied_by(self, tool_info: Dict[str, Any]) -> bool:
+        """Check if dependency is satisfied by tool info."""
+        if self.dependency_type == DependencyType.CONFLICT:
+            return tool_info.get('name') != self.name
+        
+        if tool_info.get('name') != self.name:
+            # Check if tool provides the required capability
+            capabilities = tool_info.get('capabilities', set())
+            if isinstance(capabilities, (list, set)):
+                if self.name not in capabilities:
+                    return False
+        
+        # Check version constraint if specified
+        if self.version_constraint and 'version' in tool_info:
+            try:
+                tool_version = Version(tool_info['version'])
+                constraint = self.version_constraint
+                
+                if constraint.startswith('>='):
+                    return tool_version >= Version(constraint[2:])
+                elif constraint.startswith('<='):
+                    return tool_version <= Version(constraint[2:])
+                elif constraint.startswith('>'):
+                    return tool_version > Version(constraint[1:])
+                elif constraint.startswith('<'):
+                    return tool_version < Version(constraint[1:])
+                elif constraint.startswith('~'):
+                    base_version = Version(constraint[1:])
+                    return (tool_version >= base_version and 
+                           tool_version.major == base_version.major and
+                           tool_version.minor == base_version.minor)
+                elif constraint.startswith('=='):
+                    return tool_version == Version(constraint[2:])
+                else:
+                    return tool_version == Version(constraint)
+            except Exception:
+                # If version parsing fails, assume satisfied
+                return True
+        
+        return True
+
+
+@dataclass
+class CoordinationConfig:
+    """Configuration for tool coordination."""
+    
+    # Execution preferences
+    prefer_parallel: bool = True
+    max_parallel_tools: int = 3
+    timeout_multiplier: float = 1.0
+    
+    # Dependency resolution
+    resolve_dependencies: bool = True
+    allow_dependency_fallbacks: bool = True
+    strict_version_checking: bool = False
+    
+    # Error handling
+    fail_on_missing_dependencies: bool = False
+    continue_on_optional_failure: bool = True
+    max_retry_attempts: int = 2
+    
+    # Resource management
+    share_context_between_tools: bool = True
+    cache_tool_results: bool = True
+    result_cache_ttl: int = 3600  # seconds
+
+
+@dataclass
+class ContextualRequest:
+    """Enhanced request object with context awareness."""
+    
+    # Original request
+    raw_request: str
+    processed_request: str
+    request_type: str  # command, question, task, etc.
+    
+    # Context clues
+    mentioned_files: List[str] = field(default_factory=list)
+    mentioned_tools: List[str] = field(default_factory=list)
+    required_capabilities: Set[str] = field(default_factory=set)
+    
+    # Intent analysis
+    intent: str = ""  # create, modify, analyze, etc.
+    confidence: float = 0.0
+    urgency: str = "normal"  # low, normal, high, critical
+
+
 @dataclass
 class ToolContext:
     """Context object for tool execution with shared state."""
     
-    # Core context
-    request_id: str
-    user_request: str
+    # Core context - make more flexible
+    tool_manager: Optional[Any] = None
+    mcp_service: Optional[Any] = None
+    config: Optional[Any] = None
+    current_path: Optional[str] = None
+    history: Optional[List[Dict]] = None
+    
+    # Optional detailed context
+    request_id: Optional[str] = None
+    user_request: Optional[str] = None
     session_id: Optional[str] = None
     
     # Execution context
@@ -47,14 +182,26 @@ class ToolContext:
     previous_results: Dict[str, Any] = field(default_factory=dict)
     tool_chain: List[str] = field(default_factory=list)
     
-    # Configuration
-    config: Optional[Any] = None
-    mcp_service: Optional[Any] = None
+    # Provider
     provider: Optional[Any] = None
     
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    
+    def __post_init__(self):
+        """Initialize optional fields after construction."""
+        import uuid
+        
+        if self.request_id is None:
+            self.request_id = str(uuid.uuid4())
+        
+        if self.session_id is None:
+            self.session_id = str(uuid.uuid4())
+        
+        # Use current_path if current_dir is not set
+        if self.current_dir is None and self.current_path:
+            self.current_dir = self.current_path
     
     def update_state(self, key: str, value: Any) -> None:
         """Update shared state."""
@@ -158,9 +305,24 @@ class Tool(ABC):
         return {self.name}
     
     @property
-    def dependencies(self) -> Set[str]:
-        """Set of tool names this tool depends on."""
+    def dependencies(self) -> List[ToolDependency]:
+        """List of tool dependencies this tool requires."""
+        return []
+    
+    @property
+    def legacy_dependencies(self) -> Set[str]:
+        """Legacy simple dependency names (for backward compatibility)."""
         return set()
+    
+    @property
+    def provides_capabilities(self) -> Set[str]:
+        """Capabilities this tool provides (beyond its name)."""
+        return set()
+    
+    @property
+    def coordination_config(self) -> CoordinationConfig:
+        """Tool coordination configuration."""
+        return CoordinationConfig()
     
     @property
     def required_context(self) -> Set[str]:
@@ -186,6 +348,11 @@ class Tool(ABC):
     def timeout_seconds(self) -> float:
         """Execution timeout in seconds (0 = no timeout)."""
         return 30.0
+    
+    @property
+    def version(self) -> str:
+        """Tool version for dependency resolution."""
+        return "1.0.0"
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """
@@ -246,6 +413,129 @@ class Tool(ABC):
         Cleanup after tool execution.
         
         Called after execute() regardless of success/failure.
+        """
+        pass
+    
+    def check_dependencies(self, available_tools: Dict[str, Any]) -> Tuple[bool, List[str]]:
+        """Check if all dependencies are satisfied.
+        
+        Args:
+            available_tools: Dict of tool_name -> tool_info
+            
+        Returns:
+            Tuple of (all_satisfied, missing_dependencies)
+        """
+        missing_deps = []
+        
+        # Check new dependency system
+        for dep in self.dependencies:
+            satisfied = False
+            
+            # Check direct tool match
+            if dep.name in available_tools:
+                if dep.is_satisfied_by(available_tools[dep.name]):
+                    satisfied = True
+            
+            # Check capability match
+            if not satisfied:
+                for tool_name, tool_info in available_tools.items():
+                    capabilities = tool_info.get('capabilities', set())
+                    if isinstance(capabilities, (list, set)) and dep.name in capabilities:
+                        if dep.is_satisfied_by(tool_info):
+                            satisfied = True
+                            break
+            
+            # Check fallbacks
+            if not satisfied and dep.fallback_tools:
+                for fallback in dep.fallback_tools:
+                    if fallback in available_tools:
+                        if dep.is_satisfied_by(available_tools[fallback]):
+                            satisfied = True
+                            break
+            
+            # Handle missing dependency
+            if not satisfied:
+                if dep.dependency_type == DependencyType.REQUIRED:
+                    missing_deps.append(dep.name)
+                elif dep.dependency_type == DependencyType.OPTIONAL:
+                    self.logger.debug(f"Optional dependency not available: {dep.name}")
+        
+        # Check legacy dependencies for backward compatibility
+        for dep_name in self.legacy_dependencies:
+            if dep_name not in available_tools:
+                missing_deps.append(dep_name)
+        
+        return len(missing_deps) == 0, missing_deps
+    
+    def get_execution_order_hints(self) -> Dict[str, int]:
+        """Get hints for tool execution ordering.
+        
+        Returns:
+            Dict of dependency_name -> preference_score
+            Higher scores indicate should execute earlier
+        """
+        hints = {}
+        
+        for dep in self.dependencies:
+            if dep.dependency_type == DependencyType.REQUIRED:
+                hints[dep.name] = 100
+            elif dep.dependency_type == DependencyType.OPTIONAL:
+                hints[dep.name] = 50
+        
+        return hints
+    
+    def can_run_parallel_with(self, other_tool: 'Tool') -> bool:
+        """Check if this tool can run in parallel with another tool.
+        
+        Args:
+            other_tool: Another tool instance
+            
+        Returns:
+            True if tools can run in parallel
+        """
+        # Check for conflicts
+        for dep in self.dependencies:
+            if dep.dependency_type == DependencyType.CONFLICT:
+                if (dep.name == other_tool.name or 
+                    dep.name in other_tool.provides_capabilities):
+                    return False
+        
+        # Check other tool's conflicts
+        for dep in other_tool.dependencies:
+            if dep.dependency_type == DependencyType.CONFLICT:
+                if (dep.name == self.name or 
+                    dep.name in self.provides_capabilities):
+                    return False
+        
+        # Check coordination config
+        return (self.coordination_config.prefer_parallel and 
+                other_tool.coordination_config.prefer_parallel)
+    
+    async def prepare_for_coordination(self, context: ToolContext) -> bool:
+        """Prepare tool for coordinated execution.
+        
+        Called before execute() in coordinated scenarios.
+        Override to implement tool-specific preparation.
+        
+        Args:
+            context: Tool execution context
+            
+        Returns:
+            True if preparation successful
+        """
+        return True
+    
+    async def coordinate_with_dependency(self, 
+                                       dependency_result: ToolResult, 
+                                       context: ToolContext) -> None:
+        """Handle result from a dependency tool.
+        
+        Called when a dependency tool completes successfully.
+        Override to implement custom coordination logic.
+        
+        Args:
+            dependency_result: Result from dependency tool
+            context: Tool execution context
         """
         pass
     

@@ -8,9 +8,11 @@ from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass
 import logging
 
-from .tool_interface import Tool, ToolResult, ToolContext, ToolStatus, ToolPriority
+from .tool_interface import Tool, ToolResult, ToolContext, ToolStatus, ToolPriority, CoordinationConfig
 from .tool_registry import ToolRegistry, ToolInfo
 from .tool_context import ToolContextManager, RequestAnalyzer, ContextualRequest
+from .tool_performance_monitor import ToolPerformanceMonitor
+from .tool_coordinator import ToolCoordinator
 
 
 @dataclass
@@ -46,12 +48,14 @@ class ToolManager:
     Provides intelligent routing and execution planning.
     """
     
-    def __init__(self, auto_discover: bool = True):
+    def __init__(self, auto_discover: bool = True, enable_performance_monitoring: bool = True, enable_coordination: bool = True):
         """
         Initialize tool manager.
         
         Args:
             auto_discover: Whether to automatically discover tools
+            enable_performance_monitoring: Whether to enable advanced performance monitoring
+            enable_coordination: Whether to enable tool coordination and dependency resolution
         """
         self.logger = logging.getLogger("codexa.tools.manager")
         
@@ -60,13 +64,24 @@ class ToolManager:
         self.context_manager = ToolContextManager()
         self.request_analyzer = RequestAnalyzer()
         
+        # Performance monitoring
+        self.performance_monitor = ToolPerformanceMonitor() if enable_performance_monitoring else None
+        if self.performance_monitor:
+            self.performance_monitor.start_monitoring()
+            self.logger.info("Performance monitoring enabled")
+        
+        # Tool coordination
+        self.coordinator = ToolCoordinator(self.registry) if enable_coordination else None
+        if self.coordinator:
+            self.logger.info("Tool coordination enabled")
+        
         # Execution state
         self._active_executions: Dict[str, asyncio.Task] = {}
         self._execution_history: List[Dict[str, Any]] = []
         self._max_concurrent_executions = 5
         self._max_history = 1000
         
-        # Performance tracking
+        # Performance tracking (legacy - replaced by performance_monitor)
         self._total_executions = 0
         self._successful_executions = 0
         self._failed_executions = 0
@@ -109,6 +124,7 @@ class ToolManager:
     
     async def process_request(self, 
                             request: str,
+                            context: Optional[ToolContext] = None,
                             session_id: Optional[str] = None,
                             current_dir: Optional[str] = None,
                             config: Optional[Any] = None,
@@ -116,6 +132,8 @@ class ToolManager:
                             provider: Optional[Any] = None,
                             max_tools: int = 3,
                             allow_parallel: bool = True,
+                            enable_coordination: bool = True,
+                            coordination_config: Optional[CoordinationConfig] = None,
                             **kwargs) -> ToolResult:
         """
         Process user request using appropriate tools.
@@ -135,45 +153,60 @@ class ToolManager:
             Consolidated tool result
         """
         try:
-            # Create execution context
-            context = self.context_manager.create_context(
-                user_request=request,
-                session_id=session_id,
-                current_dir=current_dir,
-                config=config,
-                mcp_service=mcp_service,
-                provider=provider,
-                **kwargs
-            )
+            # Create execution context if not provided
+            if context is None:
+                context = self.context_manager.create_context(
+                    user_request=request,
+                    session_id=session_id,
+                    current_dir=current_dir,
+                    config=config,
+                    mcp_service=mcp_service,
+                    provider=provider,
+                    **kwargs
+                )
             
             # Analyze request
             contextual_request = self.request_analyzer.analyze_request(request)
             
-            # Create execution plan
-            plan = await self._create_execution_plan(
-                contextual_request, 
-                context, 
-                max_tools,
-                allow_parallel
-            )
+            # Check if coordination is enabled and beneficial
+            use_coordination = (enable_coordination and 
+                              self.coordinator is not None and
+                              max_tools > 1)
             
-            if not plan.tools:
-                return ToolResult.error_result(
-                    error="No suitable tools found for request",
-                    tool_name="tool_manager"
+            if use_coordination:
+                # Use coordinated execution
+                return await self._process_request_coordinated(
+                    contextual_request,
+                    context,
+                    max_tools,
+                    coordination_config
                 )
-            
-            # Execute plan
-            result = await self._execute_plan(plan, context)
-            
-            # Update context with results
-            context.add_result("final_result", result)
-            self.context_manager.update_context(context)
-            
-            # Record execution
-            self._record_execution(plan, result)
-            
-            return result
+            else:
+                # Use legacy execution plan
+                plan = await self._create_execution_plan(
+                    contextual_request, 
+                    context, 
+                    max_tools,
+                    allow_parallel
+                )
+                
+                if not plan.tools:
+                    return ToolResult.error_result(
+                        error="No suitable tools found for request",
+                        tool_name="tool_manager"
+                    )
+                
+                # Execute plan
+                result = await self._execute_plan(plan, context)
+                
+                # Update context with results
+                context.add_result("final_result", result)
+                self.context_manager.update_context(context)
+                
+                # Record execution
+                self._record_execution(plan, result)
+                
+                return result
             
         except Exception as e:
             self.logger.error(f"Request processing failed: {e}", exc_info=True)
@@ -490,3 +523,98 @@ class ToolManager:
         # Maintain history limit
         if len(self._execution_history) > self._max_history:
             self._execution_history.pop(0)
+    
+    async def _process_request_coordinated(self,
+                                         contextual_request: ContextualRequest,
+                                         context: ToolContext,
+                                         max_tools: int,
+                                         coordination_config: Optional[CoordinationConfig]) -> ToolResult:
+        """Process request using coordinated execution."""
+        try:
+            # Find candidate tools
+            candidates = self.registry.find_tools_for_request(
+                contextual_request, 
+                context, 
+                max_tools * 2  # Get more candidates for better coordination
+            )
+            
+            # Select best tools
+            selected_tools = []
+            for tool_name, confidence in candidates[:max_tools]:
+                if confidence > 0.1:  # Minimum confidence threshold
+                    selected_tools.append(tool_name)
+            
+            if not selected_tools:
+                return ToolResult.error_result(
+                    error="No suitable tools found for coordinated request",
+                    tool_name="tool_manager"
+                )
+            
+            # Create coordination plan
+            coordination_plan = await self.coordinator.create_coordination_plan(
+                selected_tools,
+                context,
+                coordination_config
+            )
+            
+            # Execute coordinated plan
+            coordination_result = await self.coordinator.execute_coordinated_plan(
+                coordination_plan,
+                context
+            )
+            
+            # Convert coordination result to tool result
+            if coordination_result.success:
+                # Combine all successful tool results
+                combined_data = {
+                    "coordination_result": coordination_result,
+                    "tool_results": coordination_result.tool_results,
+                    "execution_order": coordination_result.execution_order,
+                    "successful_tools": coordination_result.successful_tools,
+                    "parallel_efficiency": coordination_result.parallel_efficiency
+                }
+                
+                return ToolResult.success_result(
+                    data=combined_data,
+                    tool_name="tool_manager_coordinated",
+                    execution_time=coordination_result.total_execution_time,
+                    output=self._format_coordination_output(coordination_result)
+                )
+            else:
+                return ToolResult.error_result(
+                    error=f"Coordinated execution failed: {'; '.join(coordination_result.errors)}",
+                    tool_name="tool_manager_coordinated",
+                    execution_time=coordination_result.total_execution_time
+                )
+        
+        except Exception as e:
+            self.logger.error(f"Coordinated request processing failed: {e}")
+            return ToolResult.error_result(
+                error=f"Coordinated processing error: {str(e)}",
+                tool_name="tool_manager_coordinated"
+            )
+    
+    def _format_coordination_output(self, coordination_result) -> str:
+        """Format coordination results for display."""
+        output_parts = []
+        
+        # Add execution summary
+        output_parts.append(f"**Coordination Summary:**")
+        output_parts.append(f"- Tools executed: {len(coordination_result.successful_tools)}/{len(coordination_result.tool_results)}")
+        output_parts.append(f"- Execution order: {' → '.join(coordination_result.execution_order)}")
+        output_parts.append(f"- Parallel efficiency: {coordination_result.parallel_efficiency:.1%}")
+        output_parts.append(f"- Total time: {coordination_result.total_execution_time:.3f}s")
+        
+        # Add tool outputs
+        for tool_name in coordination_result.execution_order:
+            result = coordination_result.tool_results.get(tool_name)
+            if result and result.success and result.output:
+                output_parts.append(f"**{tool_name}:**\n{result.output}")
+        
+        return "\n\n".join(output_parts) if output_parts else None
+    
+    def get_coordination_stats(self) -> Optional[Dict[str, Any]]:
+        """Get coordination statistics."""
+        if self.coordinator:
+            return self.coordinator.get_coordination_stats()
+        return None

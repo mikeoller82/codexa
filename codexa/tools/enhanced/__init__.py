@@ -3,6 +3,8 @@ Enhanced feature tools for Codexa tool system.
 """
 
 # Import all enhanced tools for auto-discovery
+from .performance_dashboard_tool import PerformanceDashboardTool
+from .dependency_demo_tool import DataValidatorTool, DataProcessorTool, ReportGeneratorTool, CoordinationDemoTool
 from .ascii_logo_tool import ASCIILogoTool
 from .animation_tool import AnimationTool
 from .theme_tool import ThemeTool
@@ -12,13 +14,13 @@ from .search_tool import SearchTool
 from .code_generation_tool import CodeGenerationTool
 from .planning_tool import PlanningTool
 from .execution_tool import ExecutionTool
-from .error_handling_tool import ErrorHandlingTool
-from .user_guidance_tool import UserGuidanceTool
-from .suggestion_tool import SuggestionTool
-from .analytics_tool import AnalyticsTool
-from .session_tool import SessionTool
 
 __all__ = [
+    'PerformanceDashboardTool',
+    'DataValidatorTool',
+    'DataProcessorTool', 
+    'ReportGeneratorTool',
+    'CoordinationDemoTool',
     'ASCIILogoTool',
     'AnimationTool',
     'ThemeTool',
@@ -27,10 +29,5 @@ __all__ = [
     'SearchTool',
     'CodeGenerationTool',
     'PlanningTool',
-    'ExecutionTool',
-    'ErrorHandlingTool',
-    'UserGuidanceTool',
-    'SuggestionTool',
-    'AnalyticsTool',
-    'SessionTool'
+    'ExecutionTool'
 ]
