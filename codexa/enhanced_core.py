@@ -139,7 +139,7 @@ class EnhancedCodexaAgent:
 
     async def _main_loop(self):
         """Main interaction loop using tool-based request processing."""
-        console.print("\n[green]✅ Codexa is ready! Type your request or '/help' for assistance.[/green]")
+        console.print("")  # Just a blank line, no repeated ready message
         
         while True:
             try:

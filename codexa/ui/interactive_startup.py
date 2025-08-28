@@ -144,8 +144,8 @@ class InteractiveStartup:
         # Feature preferences
         await self._setup_features()
         
-        # Show completion
-        await self._show_setup_complete()
+        # Show simple completion
+        console.print("[green]✓ Setup complete![/green]")
         
         return {
             "flow": "first_time",
@@ -334,33 +334,7 @@ class InteractiveStartup:
     
     async def _show_setup_complete(self):
         """Show setup completion message."""
-        self.console.print("\n")
-        
-        completion_panel = Panel(
-            Align.center(
-                Text.from_markup(
-                    "[bold green]Setup Complete![/bold green]\n\n"
-                    "Codexa is now configured and ready to use.\n\n"
-                    "[yellow]Quick Tips:[/yellow]\n"
-                    "• Type naturally to describe what you want to build\n"
-                    "• Use [cyan]/help[/cyan] to see available commands\n"
-                    "• Use [cyan]/status[/cyan] to check system status\n"
-                    "• Use [cyan]/provider switch <name>[/cyan] to change AI providers\n\n"
-                    "[bold cyan]Happy coding! 🚀[/bold cyan]"
-                )
-            ),
-            title="Welcome to Codexa",
-            border_style="green"
-        )
-        
-        self.console.print(completion_panel)
-        
-        # Save configuration
-        try:
-            self.config.save_config()
-            self.console.print("[dim]Configuration saved to ~/.codexarc[/dim]")
-        except Exception as e:
-            self.console.print(f"[yellow]Warning: Could not save configuration: {e}[/yellow]")
+        # This method is no longer called, replaced with simple message
     
     async def _play_startup_animation(self, animation) -> bool:
         """Play startup animation asynchronously."""

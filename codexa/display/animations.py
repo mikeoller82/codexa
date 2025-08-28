@@ -70,9 +70,7 @@ class AnimationEngine:
             if self._stop_requested:
                 return False
             
-            # Phase 3: System check (optional)
-            if show_system_check:
-                await self._play_system_check()
+            # Skip system check to reduce clutter
             
             if self._stop_requested:
                 return False
@@ -159,27 +157,11 @@ class AnimationEngine:
     
     async def _play_welcome_message(self, interactive: bool = True):
         """Play welcome message with typing effect."""
-        welcome_text = """
-[bold cyan]Welcome to Codexa![/bold cyan]
-
-Your AI-powered coding assistant is ready to help you build amazing software.
-
-[yellow]Quick Tips:[/yellow]
-• Type naturally to describe what you want to build
-• Use [cyan]/help[/cyan] to see available commands
-• Start with [cyan]/workflow[/cyan] for structured project planning
-• Type [cyan]exit[/cyan] when you're done
-
-[bold green]Ready to code? Let's build something awesome! 🚀[/bold green]
-        """
+        # Simplified welcome - avoid repetition
+        welcome_text = "[bold green]Ready to code! 🚀[/bold green]"
         
-        if interactive:
-            # Typewriter effect
-            await self._typewriter_effect(welcome_text)
-        else:
-            # Just show the message
-            self.console.print(welcome_text)
-            await asyncio.sleep(2.0)
+        self.console.print(welcome_text)
+        await asyncio.sleep(0.5)
     
     async def _typewriter_effect(self, text: str, delay: float = 0.02):
         """Create typewriter effect for text."""

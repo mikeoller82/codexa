@@ -209,50 +209,10 @@ class ASCIIArtRenderer:
         
         frames = []
         
-        # Frame 1: Loading dots
-        frames.append(ASCIIFrame(
-            content=f"[{colors['primary']}]Starting Codexa.[/{colors['primary']}]",
-            duration=0.5
-        ))
-        
-        frames.append(ASCIIFrame(
-            content=f"[{colors['primary']}]Starting Codexa..[/{colors['primary']}]",
-            duration=0.5
-        ))
-        
-        frames.append(ASCIIFrame(
-            content=f"[{colors['primary']}]Starting Codexa...[/{colors['primary']}]",
-            duration=0.5
-        ))
-        
-        # Frame 2: Logo reveal
-        frames.append(ASCIIFrame(
-            content=self.render_logo(theme, show_info=False),
-            duration=1.0
-        ))
-        
-        # Frame 3: Full logo with info
+        # Single frame: Just show the logo cleanly
         frames.append(ASCIIFrame(
             content=self.render_logo(theme, show_info=True),
-            duration=2.0
-        ))
-        
-        # Frame 4: System status
-        status_text = f"""
-{self.render_logo(theme, show_info=False)}
-
-[{colors['secondary']}]System Status:[/{colors['secondary']}]
-[{colors['accent']}]✓[/{colors['accent']}] Core systems initialized
-[{colors['accent']}]✓[/{colors['accent']}] AI providers configured  
-[{colors['accent']}]✓[/{colors['accent']}] MCP servers ready
-[{colors['accent']}]✓[/{colors['accent']}] Ready for commands
-
-[{colors['primary']}]Welcome to the future of coding![/{colors['primary']}]
-        """
-        
-        frames.append(ASCIIFrame(
-            content=status_text,
-            duration=1.5
+            duration=1.0
         ))
         
         return ASCIIAnimation(frames)

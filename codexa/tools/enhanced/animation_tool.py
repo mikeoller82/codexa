@@ -181,26 +181,8 @@ class AnimationTool(Tool):
     
     def _startup_animation(self, options: Dict[str, Any]):
         """Codexa startup animation"""
-        duration = options.get('duration', 3)
-        speed = options.get('speed', 'normal')
-        
-        speed_multiplier = {'fast': 0.5, 'normal': 1.0, 'slow': 2.0}.get(speed, 1.0)
-        
-        frames = [
-            "🌟 Initializing Codexa...",
-            "⚡ Loading enhanced features...",
-            "🔧 Connecting tool systems...",
-            "🚀 Ready for coding!"
-        ]
-        
-        for frame in frames:
-            if self._stop_animation:
-                break
-            print(f"\r{frame}", end='', flush=True)
-            time.sleep(duration / len(frames) * speed_multiplier)
-        
-        if not self._stop_animation:
-            print()  # New line after animation
+        # Simple, non-repetitive startup
+        print("🚀 Codexa Ready", flush=True)
     
     def _loading_animation(self, options: Dict[str, Any]):
         """Generic loading animation"""
