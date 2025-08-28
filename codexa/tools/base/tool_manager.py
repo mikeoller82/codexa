@@ -13,6 +13,7 @@ from .tool_registry import ToolRegistry, ToolInfo
 from .tool_context import ToolContextManager, RequestAnalyzer, ContextualRequest
 from .tool_performance_monitor import ToolPerformanceMonitor
 from .tool_coordinator import ToolCoordinator
+from .ai_error_handler import AIErrorHandler
 
 
 @dataclass
@@ -75,6 +76,10 @@ class ToolManager:
         self.coordinator = ToolCoordinator(self.registry) if enable_coordination else None
         if self.coordinator:
             self.logger.info("Tool coordination enabled")
+        
+        # AI-aware error handling
+        self.error_handler = AIErrorHandler()
+        self.logger.info("AI-aware error handling enabled")
         
         # Execution state
         self._active_executions: Dict[str, asyncio.Task] = {}
@@ -271,6 +276,39 @@ class ToolManager:
         
         except Exception as e:
             self.logger.error(f"Tool execution failed: {tool_name} - {e}", exc_info=True)
+            
+            # Use AI-aware error handler for recovery
+            try:
+                recovery_result = await self.error_handler.handle_error(tool_name, e, context)
+                
+                # Check if error handler suggests retry or fallback
+                if recovery_result.success and recovery_result.data:
+                    if recovery_result.data.get("retry_requested"):
+                        # Retry the tool execution
+                        self.logger.info(f"Retrying {tool_name} as suggested by error handler")
+                        return await self.execute_tool(tool_name, context)
+                    
+                    elif recovery_result.data.get("fallback_requested"):
+                        # Suggest fallback tools to the calling system
+                        fallback_tools = recovery_result.data.get("fallback_tools", [])
+                        self.logger.info(f"Error handler suggests fallback tools: {fallback_tools}")
+                        
+                        # Try the first fallback tool if available
+                        for fallback_tool in fallback_tools:
+                            if self.registry.get_tool(fallback_tool):
+                                self.logger.info(f"Attempting fallback to {fallback_tool}")
+                                fallback_result = await self.execute_tool(fallback_tool, context)
+                                if fallback_result.success:
+                                    return fallback_result
+                
+                # If error handler provided a graceful response, use it
+                if recovery_result.success and recovery_result.data.get("degraded_mode"):
+                    return recovery_result
+                    
+            except Exception as handler_error:
+                self.logger.error(f"Error handler failed: {handler_error}")
+            
+            # Fallback to basic error result
             return ToolResult.error_result(
                 error=f"Tool execution error: {str(e)}",
                 tool_name=tool_name
@@ -358,11 +396,16 @@ class ToolManager:
             max_tools * 2  # Get more candidates for better selection
         )
         
-        # Select best tools
+        # Select best tools with lower threshold for better coverage
         selected_tools = []
         for tool_name, confidence in candidates[:max_tools]:
-            if confidence > 0.1:  # Minimum confidence threshold
+            if confidence > 0.05:  # Lowered minimum confidence threshold
                 selected_tools.append(tool_name)
+        
+        # If still no tools found, be more permissive
+        if not selected_tools and candidates:
+            # Take the best candidate even if confidence is low
+            selected_tools.append(candidates[0][0])
         
         # Resolve dependencies
         ordered_tools = self.registry.resolve_dependencies(selected_tools)
@@ -539,11 +582,17 @@ class ToolManager:
                 max_tools * 2  # Get more candidates for better coordination
             )
             
-            # Select best tools
+            # Select best tools with improved threshold logic
             selected_tools = []
             for tool_name, confidence in candidates[:max_tools]:
-                if confidence > 0.1:  # Minimum confidence threshold
+                if confidence > 0.05:  # Lowered minimum confidence threshold
                     selected_tools.append(tool_name)
+            
+            # If still no tools found, be more permissive
+            if not selected_tools and candidates:
+                # Take the best candidate even if confidence is low
+                selected_tools.append(candidates[0][0])
+                self.logger.warning(f"Using low-confidence tool {candidates[0][0]} with confidence {candidates[0][1]:.3f}")
             
             if not selected_tools:
                 return ToolResult.error_result(

@@ -235,23 +235,37 @@ class RequestAnalyzer:
         return list(set(files))  # Remove duplicates
     
     def _detect_intent(self, request: str) -> str:
-        """Detect the main intent of the request."""
+        """Detect the main intent of the request with enhanced AI-specific detection."""
         request_lower = request.lower()
         
+        # Enhanced intent keywords with AI-specific patterns
         intent_keywords = {
-            "create": ["create", "build", "generate", "make", "add", "implement"],
-            "modify": ["update", "change", "modify", "edit", "fix", "refactor"],
-            "analyze": ["analyze", "review", "check", "examine", "inspect"],
-            "delete": ["delete", "remove", "clean", "clear"],
-            "search": ["find", "search", "locate", "look for"],
-            "help": ["help", "explain", "how", "what", "guide"],
-            "configure": ["configure", "setup", "install", "enable", "disable"]
+            "create": ["create", "build", "generate", "make", "add", "implement", "write", "develop", "code", "design"],
+            "modify": ["update", "change", "modify", "edit", "fix", "refactor", "improve", "enhance", "optimize"],
+            "analyze": ["analyze", "review", "check", "examine", "inspect", "evaluate", "assess", "audit"],
+            "explain": ["explain", "describe", "clarify", "detail", "elaborate", "summarize", "document"],
+            "generate_code": ["generate code", "write code", "create function", "build class", "implement method"],
+            "generate_text": ["write text", "generate content", "create documentation", "compose", "draft"],
+            "ai_conversation": ["chat", "talk", "discuss", "ask", "question", "hello", "hi", "hey"],
+            "delete": ["delete", "remove", "clean", "clear", "uninstall"],
+            "search": ["find", "search", "locate", "look for", "grep", "query"],
+            "help": ["help", "guide", "tutorial", "how to", "usage", "instructions"],
+            "configure": ["configure", "setup", "install", "enable", "disable", "set"]
         }
         
+        # Multi-word pattern matching for better accuracy
         for intent, keywords in intent_keywords.items():
-            if any(keyword in request_lower for keyword in keywords):
-                return intent
+            for keyword in keywords:
+                if keyword in request_lower:
+                    return intent
         
+        # Fallback to pattern-based matching
+        if any(pattern in request_lower for pattern in ["integrate ai", "ai into", "add ai"]):
+            return "ai_integration"
+        
+        if any(pattern in request_lower for pattern in ["fix error", "resolve issue", "debug"]):
+            return "debug"
+            
         return "unknown"
     
     def _estimate_complexity(self, request: str) -> float:
@@ -279,18 +293,28 @@ class RequestAnalyzer:
         return min(complexity, 1.0)
     
     def _extract_capabilities(self, request: str) -> Set[str]:
-        """Extract required capabilities from request."""
+        """Extract required capabilities from request with enhanced AI detection."""
         capabilities = set()
         request_lower = request.lower()
         
+        # Enhanced capability mapping with AI-specific capabilities
         capability_map = {
-            "filesystem": ["file", "directory", "folder", "path", "read", "write"],
-            "mcp": ["documentation", "analyze", "ui", "component", "test"],
-            "ai": ["generate", "explain", "summarize", "translate"],
-            "search": ["find", "search", "locate", "grep"],
-            "git": ["commit", "branch", "merge", "repository"],
-            "configuration": ["config", "setup", "install", "configure"],
+            "filesystem": ["file", "directory", "folder", "path", "read", "write", "create", "delete"],
+            "mcp": ["documentation", "analyze", "ui", "component", "test", "server", "connection"],
+            "ai_text_generation": ["generate text", "write content", "compose", "draft", "create documentation"],
+            "ai_code_generation": ["generate code", "write code", "create function", "build class", "implement"],
+            "ai_analysis": ["analyze code", "review", "explain", "summarize", "evaluate"],
+            "ai_conversation": ["chat", "talk", "discuss", "conversation", "hello", "hi", "greeting"],
+            "search": ["find", "search", "locate", "grep", "query", "look for"],
+            "git": ["commit", "branch", "merge", "repository", "version control"],
+            "configuration": ["config", "setup", "install", "configure", "settings"],
+            "debug": ["debug", "fix", "error", "issue", "problem", "troubleshoot"],
+            "help": ["help", "guide", "explain", "how to", "tutorial", "instructions"]
         }
+        
+        # Check for AI integration requests specifically
+        if any(pattern in request_lower for pattern in ["integrate ai", "ai into", "add ai", "ai integration"]):
+            capabilities.update(["ai_integration", "ai_text_generation", "ai_code_generation"])
         
         for capability, keywords in capability_map.items():
             if any(keyword in request_lower for keyword in keywords):

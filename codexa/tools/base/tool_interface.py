@@ -362,7 +362,39 @@ class Tool(ABC):
             Float between 0.0-1.0 indicating confidence/priority.
             0.0 = cannot handle, 1.0 = perfect match
         """
-        return 0.0
+        # Default implementation with basic keyword matching
+        request_lower = request.lower()
+        confidence = 0.0
+        
+        # Check if any capabilities match request keywords
+        for capability in self.capabilities:
+            if capability.lower() in request_lower:
+                confidence = max(confidence, 0.8)
+        
+        # Check tool name match
+        if self.name.lower() in request_lower:
+            confidence = max(confidence, 0.7)
+        
+        # Check category-specific keywords
+        category_keywords = {
+            'filesystem': ['file', 'directory', 'folder', 'path', 'read', 'write', 'create', 'delete'],
+            'enhanced': ['help', 'animation', 'theme', 'generate', 'search', 'plan'],
+            'mcp': ['mcp', 'server', 'connection', 'query', 'documentation'],
+            'ai': ['generate', 'create', 'analyze', 'explain', 'code', 'text', 'ai', 'gpt']
+        }
+        
+        if self.category in category_keywords:
+            for keyword in category_keywords[self.category]:
+                if keyword in request_lower:
+                    confidence = max(confidence, 0.4)
+        
+        # General AI-related keywords that any tool might handle
+        ai_keywords = ['generate', 'create', 'make', 'build', 'analyze', 'explain', 'help']
+        for keyword in ai_keywords:
+            if keyword in request_lower:
+                confidence = max(confidence, 0.3)
+        
+        return min(confidence, 1.0)
     
     async def initialize(self, context: ToolContext) -> bool:
         """
