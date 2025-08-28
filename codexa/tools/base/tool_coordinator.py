@@ -318,7 +318,8 @@ class ToolCoordinator:
             
             # Visit dependencies first
             for dep in tool_info['dependencies']:
-                if dep.dependency_type == DependencyType.REQUIRED:
+                # Handle both ToolDependency objects and legacy strings
+                if hasattr(dep, 'dependency_type') and dep.dependency_type == DependencyType.REQUIRED:
                     # Try to find satisfying tool
                     satisfying_tool = None
                     
@@ -382,7 +383,8 @@ class ToolCoordinator:
                 
                 # Check for explicit conflicts
                 for dep in tool_info.get('dependencies', []):
-                    if dep.dependency_type == DependencyType.CONFLICT:
+                    # Handle both ToolDependency objects and legacy strings
+                    if hasattr(dep, 'dependency_type') and dep.dependency_type == DependencyType.CONFLICT:
                         if (dep.name == other_tool_name or 
                             dep.name in other_tool_info.get('provides_capabilities', set())):
                             conflicts.append(f"{tool_name} conflicts with {other_tool_name}")
@@ -403,7 +405,8 @@ class ToolCoordinator:
             
             # Process new dependencies
             for dep in tool_info.get('dependencies', []):
-                if dep.dependency_type == DependencyType.REQUIRED:
+                # Handle both ToolDependency objects and legacy strings
+                if hasattr(dep, 'dependency_type') and dep.dependency_type == DependencyType.REQUIRED:
                     # Find satisfying tool in our list
                     for candidate in tools:
                         candidate_info = available_tools.get(candidate, {})
@@ -486,17 +489,24 @@ class ToolCoordinator:
             tool_info = available_tools.get(tool_name, {})
             deps = []
             
-            # New dependencies
+            # New dependencies (handle both ToolDependency objects and legacy strings)
             for dep in tool_info.get('dependencies', []):
-                if dep.dependency_type in [DependencyType.REQUIRED, DependencyType.OPTIONAL]:
-                    # Find satisfying tool
-                    for candidate in tools:
-                        candidate_info = available_tools.get(candidate, {})
-                        if (candidate == dep.name or 
-                            dep.name in candidate_info.get('capabilities', set()) or
-                            dep.name in candidate_info.get('provides_capabilities', set())):
-                            deps.append(candidate)
-                            break
+                # Check if it's a ToolDependency object or a legacy string
+                if hasattr(dep, 'dependency_type'):
+                    # New ToolDependency object
+                    if dep.dependency_type in [DependencyType.REQUIRED, DependencyType.OPTIONAL]:
+                        # Find satisfying tool
+                        for candidate in tools:
+                            candidate_info = available_tools.get(candidate, {})
+                            if (candidate == dep.name or 
+                                dep.name in candidate_info.get('capabilities', set()) or
+                                dep.name in candidate_info.get('provides_capabilities', set())):
+                                deps.append(candidate)
+                                break
+                else:
+                    # Legacy string dependency
+                    if dep in tools:
+                        deps.append(dep)
             
             # Legacy dependencies
             for dep_name in tool_info.get('legacy_dependencies', set()):
