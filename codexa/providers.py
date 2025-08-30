@@ -1,7 +1,10 @@
 """AI provider implementations for Codexa."""
 
 import os
+import json
 import requests
+from dotenv import load_dotenv
+load_dotenv()
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 import openai
@@ -417,7 +420,7 @@ Always be proactive, take action, and show your work step-by-step like Claude Co
 
 
 class OpenRouterOAIProvider(AIProvider):
-    """OpenRouter provider using OpenAI Python client implementation."""
+    """OpenRouter provider using OpenAI Python client implementation with tool calling support."""
 
     def __init__(self, config: Config):
         self.config = config
@@ -469,6 +472,202 @@ class OpenRouterOAIProvider(AIProvider):
             
         except Exception as e:
             return f"Error calling OpenRouter (OAI): {str(e)}"
+
+    def call_with_tools(self, messages: List[Dict], tools: Optional[List[Dict]] = None, 
+                       tool_choice: str = "auto", max_iterations: int = 10) -> Dict:
+        """
+        Enhanced tool calling method implementing OpenRouter's 3-step tool calling process.
+        
+        Args:
+            messages: Conversation messages
+            tools: List of tool definitions in OpenRouter format
+            tool_choice: "auto", "none", or specific tool selection
+            max_iterations: Maximum tool calling iterations
+            
+        Returns:
+            Dict with 'content', 'tool_calls', 'messages', and metadata
+        """
+        if not self.client:
+            return {"error": "OpenRouter API key not configured."}
+
+        if not tools:
+            # No tools provided, make regular call
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2048,
+                extra_headers={
+                    "HTTP-Referer": "https://codexa.ai",
+                    "X-Title": "Codexa - AI Coding Assistant",
+                }
+            )
+            return {
+                "content": response.choices[0].message.content,
+                "tool_calls": [],
+                "messages": messages + [{"role": "assistant", "content": response.choices[0].message.content}],
+                "finish_reason": response.choices[0].finish_reason
+            }
+
+        # Implementation of OpenRouter's 3-step tool calling process
+        current_messages = messages.copy()
+        all_tool_calls = []
+        iteration = 0
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            try:
+                # Step 1: Make request with tools
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=current_messages,
+                    tools=tools,
+                    tool_choice=tool_choice,
+                    temperature=0.3,
+                    max_tokens=2048,
+                    extra_headers={
+                        "HTTP-Referer": "https://codexa.ai",
+                        "X-Title": "Codexa - AI Coding Assistant",
+                    }
+                )
+                
+                assistant_message = response.choices[0].message
+                finish_reason = response.choices[0].finish_reason
+                
+                # Add assistant response to messages
+                message_dict = {"role": "assistant", "content": assistant_message.content}
+                if assistant_message.tool_calls:
+                    message_dict["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": tc.type,
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments
+                            }
+                        } for tc in assistant_message.tool_calls
+                    ]
+                
+                current_messages.append(message_dict)
+                
+                # Check if we need to handle tool calls
+                if finish_reason == "tool_calls" and assistant_message.tool_calls:
+                    # Step 2: Process tool calls (this would be handled by Codexa's tool system)
+                    for tool_call in assistant_message.tool_calls:
+                        all_tool_calls.append({
+                            "id": tool_call.id,
+                            "function": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                            "status": "pending"
+                        })
+                        
+                        # Add placeholder tool result - actual execution handled externally
+                        current_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps({"status": "tool_execution_required", "tool_id": tool_call.id})
+                        })
+                    
+                    # Return for external tool execution
+                    return {
+                        "content": assistant_message.content,
+                        "tool_calls": all_tool_calls,
+                        "messages": current_messages,
+                        "finish_reason": finish_reason,
+                        "requires_tool_execution": True,
+                        "iteration": iteration
+                    }
+                
+                else:
+                    # No more tool calls, return final response
+                    return {
+                        "content": assistant_message.content,
+                        "tool_calls": all_tool_calls,
+                        "messages": current_messages,
+                        "finish_reason": finish_reason,
+                        "requires_tool_execution": False,
+                        "iteration": iteration
+                    }
+                    
+            except Exception as e:
+                return {
+                    "error": f"OpenRouter tool calling error: {str(e)}",
+                    "tool_calls": all_tool_calls,
+                    "messages": current_messages,
+                    "iteration": iteration
+                }
+        
+        # Max iterations reached
+        return {
+            "content": "Maximum tool calling iterations reached",
+            "tool_calls": all_tool_calls,
+            "messages": current_messages,
+            "finish_reason": "max_iterations",
+            "iteration": iteration
+        }
+
+    def execute_tool_result(self, messages: List[Dict], tool_call_id: str, tool_result: str, 
+                           tools: List[Dict]) -> Dict:
+        """
+        Step 3: Continue conversation with tool results.
+        
+        Args:
+            messages: Current conversation messages
+            tool_call_id: ID of the executed tool call
+            tool_result: Result from tool execution
+            tools: Tool definitions
+            
+        Returns:
+            Updated response dict
+        """
+        if not self.client:
+            return {"error": "OpenRouter API key not configured."}
+        
+        # Update the tool result in messages
+        updated_messages = []
+        for msg in messages:
+            if msg.get("role") == "tool" and msg.get("tool_call_id") == tool_call_id:
+                # Replace placeholder with actual result
+                updated_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": tool_result
+                })
+            else:
+                updated_messages.append(msg)
+        
+        try:
+            # Step 3: Make request with tool results
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=updated_messages,
+                tools=tools,  # Include tools in follow-up request
+                temperature=0.3,
+                max_tokens=2048,
+                extra_headers={
+                    "HTTP-Referer": "https://codexa.ai",
+                    "X-Title": "Codexa - AI Coding Assistant",
+                }
+            )
+            
+            assistant_message = response.choices[0].message
+            updated_messages.append({
+                "role": "assistant", 
+                "content": assistant_message.content
+            })
+            
+            return {
+                "content": assistant_message.content,
+                "messages": updated_messages,
+                "finish_reason": response.choices[0].finish_reason
+            }
+            
+        except Exception as e:
+            return {
+                "error": f"OpenRouter tool result processing error: {str(e)}",
+                "messages": updated_messages
+            }
 
     def is_available(self) -> bool:
         """Check if OpenRouter is available."""

@@ -132,7 +132,8 @@ class EnhancedCodexaAgent:
             tool_manager=self.tool_manager,
             mcp_service=self.mcp_service,
             config=self.config,
-            current_path=str(self.cwd)
+            current_path=str(self.cwd),
+            provider=self.provider
         )
         
         # Try to use animation tool for startup
@@ -181,7 +182,8 @@ class EnhancedCodexaAgent:
                 config=self.config,
                 current_path=str(self.cwd),
                 history=self.history,
-                user_request=request
+                user_request=request,
+                provider=self.provider
             )
             
             # Start performance tracking
