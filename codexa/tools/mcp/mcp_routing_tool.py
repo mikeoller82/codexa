@@ -28,7 +28,7 @@ class MCPRoutingTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"request"}
+        return set()  # Uses user_request as fallback
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""

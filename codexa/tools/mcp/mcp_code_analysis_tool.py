@@ -29,7 +29,7 @@ class MCPCodeAnalysisTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"code"}
+        return set()  # Can extract code from user request or file path
     
     @property
     def dependencies(self) -> Set[str]:

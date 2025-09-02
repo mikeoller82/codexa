@@ -29,7 +29,7 @@ class MCPQueryTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"query"}
+        return set()  # Can extract query from user request
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""

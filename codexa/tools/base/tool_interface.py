@@ -435,7 +435,9 @@ class Tool(ABC):
         """
         # Check required context keys
         for key in self.required_context:
-            if not hasattr(context, key) or getattr(context, key) is None:
+            # Check both shared_state and direct attributes
+            value = context.get_state(key)
+            if value is None:
                 self.logger.error(f"Required context key missing: {key}")
                 return False
         return True

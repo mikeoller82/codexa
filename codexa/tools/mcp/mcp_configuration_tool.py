@@ -29,7 +29,7 @@ class MCPConfigurationTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"action"}
+        return set()  # Can extract action from user request
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""

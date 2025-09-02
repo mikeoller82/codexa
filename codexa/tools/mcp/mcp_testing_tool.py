@@ -29,7 +29,7 @@ class MCPTestingTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"test_type"}
+        return set()  # Can extract test_type and target from user request
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""
