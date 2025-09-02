@@ -18,7 +18,7 @@ from rich import box
 from rich.rule import Rule
 
 from .enhanced_ui import EnhancedUI, get_theme
-from .ascii_art import ASCIIRenderer, LogoTheme
+from .ascii_art import ASCIIArtRenderer, LogoTheme
 
 
 class EnhancedStartup:
@@ -27,7 +27,7 @@ class EnhancedStartup:
     def __init__(self, console: Optional[Console] = None, theme: str = "default"):
         self.console = console or Console()
         self.ui = EnhancedUI(console, get_theme(theme))
-        self.ascii_renderer = ASCIIRenderer(console)
+        self.ascii_renderer = ASCIIArtRenderer(console)
         self.startup_tasks = []
         self.current_task = 0
     
@@ -127,7 +127,7 @@ class EnhancedStartup:
     def _create_logo_panel(self, title: str, subtitle: str) -> Panel:
         """Create the logo panel with ASCII art."""
         # Get ASCII logo
-        logo = self.ascii_renderer.get_logo(LogoTheme.DEFAULT)
+        logo = self.ascii_renderer.render_logo(LogoTheme.DEFAULT)
         
         # Create title text
         title_text = Text()
@@ -239,7 +239,7 @@ class EnhancedStartup:
             except KeyboardInterrupt:
                 pass
     
-    def show_system_status(self, status_data: Dict[str, Any]) -> None:
+    async def show_system_status(self, status_data: Dict[str, Any]) -> None:
         """Show system status with enhanced UI."""
         self.ui.clear_screen()
         
