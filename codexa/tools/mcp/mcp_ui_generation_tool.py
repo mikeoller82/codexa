@@ -13,7 +13,7 @@ class MCPUIGenerationTool(Tool):
     """Tool for generating UI components using MCP servers (especially Magic)."""
     
     def __init__(self):
-        self.logger = logging.getLogger("codexa.tools.mcp_ui_generation")
+        super().__init__()
     
     @property
     def name(self) -> str:
