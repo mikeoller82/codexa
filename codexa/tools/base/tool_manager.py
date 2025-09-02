@@ -400,12 +400,49 @@ class ToolManager:
         selected_tools = []
         for tool_name, confidence in candidates[:max_tools]:
             if confidence > 0.05:  # Lowered minimum confidence threshold
-                selected_tools.append(tool_name)
+                # Check if tool can actually execute with current context
+                tool = self.registry.get_tool(tool_name)
+                if tool and self._can_tool_execute(tool, context):
+                    selected_tools.append(tool_name)
+                else:
+                    self.logger.debug(f"Skipping tool {tool_name} due to context validation")
         
         # If still no tools found, be more permissive
         if not selected_tools and candidates:
-            # Take the best candidate even if confidence is low
-            selected_tools.append(candidates[0][0])
+            # Try to find any tool that can execute, even with low confidence
+            for tool_name, confidence in candidates:
+                tool = self.registry.get_tool(tool_name)
+                if tool and self._can_tool_execute(tool, context):
+                    selected_tools.append(tool_name)
+                    break
+        
+        # CRITICAL: Ensure we always have at least one tool available
+        # This prevents "no suitable tools found" errors
+        if not selected_tools:
+            # Try to get the universal fallback tool
+            fallback_tool = self.registry.get_tool("universal_fallback")
+            if fallback_tool:
+                selected_tools.append("universal_fallback")
+                self.logger.info("Using universal fallback tool as last resort")
+            else:
+                # If fallback tool not available, use any tool with lowest confidence
+                if candidates:
+                    selected_tools.append(candidates[0][0])
+                    self.logger.warning(f"Using low-confidence tool {candidates[0][0]} as fallback")
+                else:
+                    # This should never happen, but if it does, we need to handle it
+                    self.logger.error("No tools available at all - this indicates a serious system issue")
+                    # Try to register the fallback tool dynamically
+                    try:
+                        from ..enhanced.universal_fallback_tool import UniversalFallbackTool
+                        self.registry.register_tool(UniversalFallbackTool)
+                        selected_tools.append("universal_fallback")
+                        self.logger.info("Dynamically registered universal fallback tool")
+                    except Exception as e:
+                        self.logger.error(f"Failed to register fallback tool: {e}")
+                        # Last resort - use conversational tool if available
+                        if "conversational_tool" in self.registry.get_all_tools():
+                            selected_tools.append("conversational_tool")
         
         # Resolve dependencies
         ordered_tools = self.registry.resolve_dependencies(selected_tools)
@@ -524,6 +561,36 @@ class ToolManager:
         
         return total_time
     
+    def _can_tool_execute(self, tool: Tool, context: ToolContext) -> bool:
+        """Check if a tool can execute with the given context."""
+        try:
+            # For fallback tools, be more lenient
+            if hasattr(tool, 'name') and tool.name in ['universal_fallback', 'conversational_tool']:
+                return True
+            
+            # For AI provider tool, be lenient if no other tools are available
+            if hasattr(tool, 'name') and tool.name == 'ai_provider':
+                return True
+            
+            # Check if tool has required context
+            if hasattr(tool, 'required_context') and tool.required_context:
+                for required_key in tool.required_context:
+                    if not hasattr(context, required_key) or getattr(context, required_key) is None:
+                        # For tools that require specific context, be more strict
+                        if required_key in ['file_path', 'pattern', 'directory_path']:
+                            return False
+            
+            # Check if tool has validate_context method
+            if hasattr(tool, 'validate_context'):
+                # We can't call the async method here, so we'll be conservative
+                # and assume it might work if basic context is available
+                pass
+            
+            return True
+        except Exception as e:
+            self.logger.debug(f"Error checking tool execution capability: {e}")
+            return False
+    
     def _should_stop_on_error(self, result: ToolResult, plan: ExecutionPlan) -> bool:
         """Determine if execution should stop on error."""
         # For now, continue on non-critical errors
@@ -586,19 +653,50 @@ class ToolManager:
             selected_tools = []
             for tool_name, confidence in candidates[:max_tools]:
                 if confidence > 0.05:  # Lowered minimum confidence threshold
-                    selected_tools.append(tool_name)
+                    # Check if tool can actually execute with current context
+                    tool = self.registry.get_tool(tool_name)
+                    if tool and self._can_tool_execute(tool, context):
+                        selected_tools.append(tool_name)
+                    else:
+                        self.logger.debug(f"Skipping tool {tool_name} due to context validation in coordination")
             
             # If still no tools found, be more permissive
             if not selected_tools and candidates:
-                # Take the best candidate even if confidence is low
-                selected_tools.append(candidates[0][0])
-                self.logger.warning(f"Using low-confidence tool {candidates[0][0]} with confidence {candidates[0][1]:.3f}")
+                # Try to find any tool that can execute, even with low confidence
+                for tool_name, confidence in candidates:
+                    tool = self.registry.get_tool(tool_name)
+                    if tool and self._can_tool_execute(tool, context):
+                        selected_tools.append(tool_name)
+                        self.logger.warning(f"Using low-confidence tool {tool_name} with confidence {confidence:.3f}")
+                        break
             
+            # CRITICAL: Ensure we always have at least one tool available for coordinated execution
             if not selected_tools:
-                return ToolResult.error_result(
-                    error="No suitable tools found for coordinated request",
-                    tool_name="tool_manager"
-                )
+                # Try to get the universal fallback tool
+                fallback_tool = self.registry.get_tool("universal_fallback")
+                if fallback_tool:
+                    selected_tools.append("universal_fallback")
+                    self.logger.info("Using universal fallback tool for coordinated execution")
+                else:
+                    # If fallback tool not available, use any tool with lowest confidence
+                    if candidates:
+                        selected_tools.append(candidates[0][0])
+                        self.logger.warning(f"Using low-confidence tool {candidates[0][0]} as coordinated fallback")
+                    else:
+                        # This should never happen, but if it does, we need to handle it
+                        self.logger.error("No tools available for coordinated execution - this indicates a serious system issue")
+                        # Try to register the fallback tool dynamically
+                        try:
+                            from ..enhanced.universal_fallback_tool import UniversalFallbackTool
+                            self.registry.register_tool(UniversalFallbackTool)
+                            selected_tools.append("universal_fallback")
+                            self.logger.info("Dynamically registered universal fallback tool for coordination")
+                        except Exception as e:
+                            self.logger.error(f"Failed to register fallback tool for coordination: {e}")
+                            return ToolResult.error_result(
+                                error="No suitable tools found for coordinated request and fallback registration failed",
+                                tool_name="tool_manager"
+                            )
             
             # Create coordination plan
             coordination_plan = await self.coordinator.create_coordination_plan(

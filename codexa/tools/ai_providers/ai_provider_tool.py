@@ -72,6 +72,16 @@ class AIProviderTool(Tool):
         if any(word in request_lower for word in ["create", "generate", "explain", "analyze", "help", "fix"]):
             confidence = max(confidence, 0.4)
         
+        # Even lower confidence for any request that contains common words
+        # This ensures AI provider is available as a last resort
+        common_words = ["the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with", "by"]
+        if any(word in request_lower for word in common_words):
+            confidence = max(confidence, 0.1)
+        
+        # Absolute fallback - any non-empty request gets minimal confidence
+        if request_lower.strip():
+            confidence = max(confidence, 0.05)
+        
         return confidence
     
     async def execute(self, context: ToolContext) -> ToolResult:

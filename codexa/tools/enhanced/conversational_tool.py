@@ -194,6 +194,23 @@ Try asking me something like "create a Python function" or "help me debug this c
         ]
         if request_lower in single_word_patterns:
             return 0.8
+        
+        # Handle general requests that don't match other tools
+        # This provides a safety net for requests that might not match specific tools
+        general_indicators = [
+            'what', 'how', 'why', 'when', 'where', 'who', 'can you', 'could you',
+            'please', 'i need', 'i want', 'i would like', 'show me', 'tell me',
+            'explain', 'describe', 'give me', 'find', 'search', 'look for'
+        ]
+        
+        # Check if request contains general indicators
+        for indicator in general_indicators:
+            if indicator in request_lower:
+                return 0.3  # Low confidence but still available
+        
+        # Handle very short or unclear requests
+        if len(request_lower.split()) <= 3:
+            return 0.2  # Very low confidence for short requests
             
         return 0.0
     
