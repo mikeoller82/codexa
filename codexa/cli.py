@@ -12,6 +12,8 @@ from .config import Config
 try:
     from .enhanced_core import EnhancedCodexaAgent as CodexaAgent
     from .display.ascii_art import ASCIIArtRenderer, LogoTheme
+    from .display.enhanced_startup import EnhancedStartup
+    from .display.enhanced_ui import EnhancedUI, get_theme
     ENHANCED_FEATURES = True
 except ImportError:
     from .core import CodexaAgent
@@ -53,18 +55,31 @@ def main(
         try:
             agent = CodexaAgent()
             
-            # Show ASCII logo if enhanced features available
+            # Show enhanced startup if available
             if ENHANCED_FEATURES:
                 try:
-                    ascii_art = ASCIIArtRenderer()
-                    logo = ascii_art.render_logo(LogoTheme.DEFAULT)
-                    console.print(logo)
-                except Exception:
-                    pass  # Fallback to basic startup
-                
-                # Use async session if enhanced
-                import asyncio
-                asyncio.run(agent.start_session())
+                    import asyncio
+                    startup = EnhancedStartup(console, "default")
+                    
+                    # Show startup sequence and welcome screen
+                    async def enhanced_startup():
+                        await startup.show_startup_sequence()
+                        startup.show_welcome_screen()
+                        await agent.start_session()
+                    
+                    asyncio.run(enhanced_startup())
+                except Exception as e:
+                    console.print(f"[yellow]Enhanced startup failed, using basic mode: {e}[/yellow]")
+                    # Fallback to basic startup
+                    try:
+                        ascii_art = ASCIIArtRenderer()
+                        logo = ascii_art.render_logo(LogoTheme.DEFAULT)
+                        console.print(logo)
+                    except Exception:
+                        pass  # Fallback to basic startup
+                    
+                    import asyncio
+                    asyncio.run(agent.start_session())
             else:
                 agent.start_session()
                 
