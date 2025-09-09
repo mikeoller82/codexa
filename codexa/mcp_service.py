@@ -128,10 +128,13 @@ class MCPService:
         try:
             start_time = datetime.now()
             
+            # Determine the correct tool name for filesystem operations
+            tool_name = self._map_request_to_tool_name(request)
+            
             # Send request to server using tools/call method
             result = await self.connection_manager.send_request(
                 server_name, "tools/call", {
-                    "name": request,
+                    "name": tool_name,
                     "arguments": context
                 }
             )
@@ -354,7 +357,35 @@ class MCPService:
                 self.logger.error(f"Failed to restart server: {server_name}")
             
             return success
-            
+        
         except Exception as e:
             self.logger.error(f"Error restarting server {server_name}: {e}")
             return False
+    
+    def _map_request_to_tool_name(self, request: str) -> str:
+        """Map a request string to the appropriate MCP tool name."""
+        # Handle filesystem operations mapping
+        filesystem_mappings = {
+            "read_file": "read_file",
+            "write_file": "write_file", 
+            "modify_file": "modify_file",
+            "copy_file": "copy_file",
+            "move_file": "move_file",
+            "delete_file": "delete_file",
+            "list_directory": "list_directory",
+            "create_directory": "create_directory",
+            "tree": "get_directory_tree",
+            "get_directory_tree": "get_directory_tree",
+            "search_files": "search_files",
+            "search_within_files": "search_within_files",
+            "get_file_info": "get_file_info",
+            "read_multiple_files": "read_multiple_files",
+            "list_allowed_directories": "list_allowed_directories"
+        }
+        
+        # Direct mapping if available
+        if request in filesystem_mappings:
+            return filesystem_mappings[request]
+        
+        # Fallback to original request
+        return request

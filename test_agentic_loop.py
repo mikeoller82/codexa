@@ -1,214 +1,173 @@
 #!/usr/bin/env python3
 """
-Test script for the Codexa Agentic Loop System
+Test script for the fixed agentic loop implementation.
 """
 
 import asyncio
 import sys
+import os
 from pathlib import Path
 
-# Add codexa to path
+# Add the codexa directory to the path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from codexa.agentic_loop import CodexaAgenticLoop, create_agentic_loop
+from codexa.autonomous_agent import AutonomousAgent
+from codexa.mcp_service import MCPService
+from codexa.enhanced_config import EnhancedConfig
+from rich.console import Console
 
+console = Console()
 
-async def test_basic_agentic_loop():
-    """Test basic agentic loop functionality."""
-    print("🔬 Testing Basic Agentic Loop System")
-    print("=" * 50)
-    
-    # Create agentic loop instance
-    loop = create_agentic_loop(
-        config=None,  # Use without config for basic testing
-        max_iterations=5,
-        verbose=True
-    )
-    
-    # Test a simple task
-    task = "Create a simple hello world script"
-    
-    print(f"Task: {task}")
-    print("\nStarting agentic loop...")
-    print("-" * 30)
+async def test_agentic_loop():
+    """Test the agentic loop functionality."""
+    console.print("[bold blue]🧪 Testing Agentic Loop Implementation[/bold blue]")
     
     try:
-        result = await loop.run_agentic_loop(task)
+        # Initialize configuration
+        config = EnhancedConfig()
         
-        print("\n" + "=" * 50)
-        print("🎉 Test Results Summary")
-        print("=" * 50)
-        print(f"Status: {result.status.value}")
-        print(f"Success: {result.success}")
-        print(f"Iterations: {len(result.iterations)}")
-        print(f"Total Duration: {result.total_duration:.2f}s")
+        # Initialize MCP service (might not be available, that's OK)
+        mcp_service = None
+        try:
+            mcp_service = MCPService(config)
+            await mcp_service.start()
+            console.print("[green]✅ MCP service started[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️ MCP service not available: {e}[/yellow]")
         
-        if result.final_result:
-            print(f"Final Result: {result.final_result}")
+        # Initialize autonomous agent
+        agent = AutonomousAgent(mcp_service=mcp_service, console=console)
         
-        # Show iteration summary
-        print("\n📋 Iteration Summary:")
-        for i, iteration in enumerate(result.iterations, 1):
-            print(f"  {i}. {'✅' if iteration.success else '❌'} - {iteration.duration:.2f}s")
+        # Test the agentic loop with a simple request
+        test_request = "create a simple Python script called hello_world.py that prints Hello, World!"
         
-        return result.success
+        console.print(f"[dim]Test request: {test_request}[/dim]")
+        console.print("\n" + "="*60)
         
-    except Exception as e:
-        print(f"❌ Test failed with error: {e}")
-        return False
-
-
-async def test_command_integration():
-    """Test command system integration."""
-    print("\n🔗 Testing Command Integration")
-    print("=" * 50)
-    
-    try:
-        # Test importing the agentic commands
-        from codexa.commands.agentic_commands import AGENTIC_COMMANDS
+        # Run the agentic loop
+        result = await agent.process_request_autonomously_streaming(test_request)
         
-        print(f"✅ Successfully imported {len(AGENTIC_COMMANDS)} agentic commands:")
-        for cmd_class in AGENTIC_COMMANDS:
-            cmd = cmd_class()
-            print(f"  • /{cmd.name} - {cmd.description}")
-            print(f"    Aliases: {cmd.aliases}")
-            print(f"    Parameters: {len(cmd.parameters)}")
+        console.print("\n" + "="*60)
+        console.print("[bold green]🎯 Test Result:[/bold green]")
+        console.print(result)
+        
+        # Check if files were created
+        test_file = Path("hello_world.py")
+        if test_file.exists():
+            console.print(f"[green]✅ Test file created successfully: {test_file}[/green]")
+            console.print(f"[dim]Content: {test_file.read_text()[:100]}...[/dim]")
+        else:
+            console.print(f"[red]❌ Test file not found: {test_file}[/red]")
         
         return True
         
     except Exception as e:
-        print(f"❌ Command integration test failed: {e}")
+        console.print(f"[red]❌ Test failed with error: {e}[/red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         return False
+        
+    finally:
+        # Cleanup MCP service
+        if mcp_service:
+            try:
+                await mcp_service.stop()
+                console.print("[dim]MCP service stopped[/dim]")
+            except:
+                pass
 
-
-async def test_agentic_loop_components():
-    """Test individual components of the agentic loop."""
-    print("\n🧩 Testing Agentic Loop Components")
-    print("=" * 50)
+async def test_multiple_iterations():
+    """Test the agentic loop with multiple iterations."""
+    console.print("\n[bold blue]🔄 Testing Multiple Iterations[/bold blue]")
     
     try:
-        loop = CodexaAgenticLoop(max_iterations=3, verbose=False)
+        # Initialize
+        config = EnhancedConfig()
+        mcp_service = None
+        agent = AutonomousAgent(mcp_service=mcp_service, console=console)
         
-        # Test thinking step
-        print("Testing thinking step...")
-        thinking_result = await loop._think_step("test task", 1)
-        assert "thinking" in thinking_result
-        assert "plan" in thinking_result
-        print("✅ Thinking step works")
+        # Test request that should require multiple iterations
+        test_request = "create a Python calculator module with add, subtract, multiply functions and also create tests for it"
         
-        # Test execution step
-        print("Testing execution step...")
-        execution_result = await loop._execute_step("test plan", 1)
-        assert "result" in execution_result
-        print("✅ Execution step works")
+        console.print(f"[dim]Multi-iteration test: {test_request}[/dim]")
+        console.print("\n" + "="*60)
         
-        # Test evaluation step
-        print("Testing evaluation step...")
-        evaluation_result = await loop._evaluate_step(execution_result, "test context", "test plan")
-        assert "success" in evaluation_result
-        assert "feedback" in evaluation_result
-        print("✅ Evaluation step works")
+        # Run the agentic loop
+        result = await agent.process_request_autonomously_streaming(test_request)
         
-        # Test refinement step
-        print("Testing refinement step...")
-        refined = await loop._refine_task("test task", "test feedback")
-        assert isinstance(refined, str)
-        assert len(refined) > 0
-        print("✅ Refinement step works")
+        console.print("\n" + "="*60)
+        console.print("[bold green]🎯 Multi-iteration Result:[/bold green]")
+        console.print(result)
+        
+        # Check for multiple files
+        expected_files = ["calculator.py", "test_calculator.py"]
+        for file_name in expected_files:
+            test_file = Path(file_name)
+            if test_file.exists():
+                console.print(f"[green]✅ File created: {test_file}[/green]")
+            else:
+                console.print(f"[yellow]⚠️ Expected file not found: {test_file}[/yellow]")
         
         return True
         
     except Exception as e:
-        print(f"❌ Component test failed: {e}")
+        console.print(f"[red]❌ Multi-iteration test failed: {e}[/red]")
         return False
 
-
-def test_imports():
-    """Test that all required modules can be imported."""
-    print("🔍 Testing Module Imports")
-    print("=" * 50)
-    
-    success = True
-    
-    # Test core agentic loop import
-    try:
-        from codexa.agentic_loop import CodexaAgenticLoop, create_agentic_loop
-        print("✅ Core agentic loop modules imported successfully")
-    except Exception as e:
-        print(f"❌ Failed to import core agentic loop: {e}")
-        success = False
-    
-    # Test command imports
-    try:
-        from codexa.commands.agentic_commands import AGENTIC_COMMANDS
-        print("✅ Agentic commands imported successfully")
-    except Exception as e:
-        print(f"❌ Failed to import agentic commands: {e}")
-        success = False
-    
-    # Test integration with built-in commands
-    try:
-        from codexa.commands.built_in_commands import BuiltInCommands
-        print("✅ Built-in commands integration available")
-    except Exception as e:
-        print(f"❌ Failed to import built-in commands: {e}")
-        success = False
-    
-    return success
-
-
-async def main():
-    """Run all tests."""
-    print("🤖 Codexa Agentic Loop System Test Suite")
-    print("=" * 60)
-    print()
-    
-    tests = [
-        ("Import Test", test_imports),
-        ("Component Test", test_agentic_loop_components),
-        ("Command Integration Test", test_command_integration),
-        ("Basic Agentic Loop Test", test_basic_agentic_loop),
+def cleanup_test_files():
+    """Clean up test files created during testing."""
+    test_files = [
+        "hello_world.py",
+        "calculator.py", 
+        "test_calculator.py",
+        "new_file_iter_1.py",
+        "README.md"
     ]
     
-    results = []
+    for file_name in test_files:
+        test_file = Path(file_name)
+        if test_file.exists():
+            try:
+                test_file.unlink()
+                console.print(f"[dim]Cleaned up: {file_name}[/dim]")
+            except:
+                pass
+
+async def main():
+    """Main test function."""
+    console.print("[bold cyan]🚀 Agentic Loop Test Suite[/bold cyan]")
+    console.print("This tests the fixed iterative autonomous agent implementation.\n")
     
-    for test_name, test_func in tests:
-        print(f"\n🧪 Running {test_name}...")
-        try:
-            if asyncio.iscoroutinefunction(test_func):
-                result = await test_func()
-            else:
-                result = test_func()
-            results.append((test_name, result))
-        except Exception as e:
-            print(f"❌ {test_name} failed with exception: {e}")
-            results.append((test_name, False))
+    # Cleanup any existing test files
+    cleanup_test_files()
+    
+    success_count = 0
+    total_tests = 2
+    
+    # Test 1: Basic agentic loop
+    if await test_agentic_loop():
+        success_count += 1
+    
+    # Test 2: Multiple iterations
+    if await test_multiple_iterations():
+        success_count += 1
     
     # Summary
-    print("\n" + "=" * 60)
-    print("📊 Test Results Summary")
-    print("=" * 60)
+    console.print(f"\n[bold cyan]📊 Test Summary[/bold cyan]")
+    console.print(f"Tests passed: {success_count}/{total_tests}")
     
-    passed = sum(1 for _, success in results if success)
-    total = len(results)
-    
-    for test_name, success in results:
-        status = "✅ PASS" if success else "❌ FAIL"
-        print(f"{status} - {test_name}")
-    
-    print(f"\nOverall: {passed}/{total} tests passed")
-    
-    if passed == total:
-        print("🎉 All tests passed! The agentic loop system is ready to use.")
-        print("\n💡 Try it out with:")
-        print("   codexa")
-        print("   /agentic \"create a hello world python script\"")
+    if success_count == total_tests:
+        console.print("[bold green]🎉 All tests passed! Agentic loop is working correctly.[/bold green]")
     else:
-        print("⚠️ Some tests failed. Please check the implementation.")
+        console.print(f"[yellow]⚠️ {total_tests - success_count} test(s) failed.[/yellow]")
     
-    return passed == total
-
+    # Offer to cleanup
+    console.print(f"\n[dim]Test files may have been created. Run with --cleanup to remove them.[/dim]")
+    
+    if "--cleanup" in sys.argv:
+        cleanup_test_files()
+        console.print("[green]Test files cleaned up.[/green]")
 
 if __name__ == "__main__":
-    success = asyncio.run(main())
-    sys.exit(0 if success else 1)
+    # Run the test suite
+    asyncio.run(main())

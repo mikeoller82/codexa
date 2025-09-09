@@ -147,79 +147,142 @@ class AutonomousAgent:
         """
         Process a user request autonomously with real-time streaming of thought process.
         
-        This version displays the reasoning process and thought process in real-time.
+        This version implements a true agentic loop that continues until the task is fully complete.
         """
         import time
         import sys
         
-        self.console.print(f"\n[bold blue]🔍 Processing request autonomously...[/bold blue]")
+        self.console.print(f"\n[bold blue]🔍 Starting agentic processing...[/bold blue]")
         self.console.print(f"[dim]Request: {request}[/dim]")
         
         # Force console to display immediately with enhanced buffer control
         self._flush_console()
         
         try:
-            # Step 1: Analyze request to determine scope and intent
-            self.console.print(f"\n[bold yellow]🧠 Analyzing request...[/bold yellow]")
-            self._flush_console()
-            time.sleep(0.15)  # Brief pause for visibility
+            # Initialize loop state
+            max_iterations = 10  # Prevent infinite loops
+            iteration = 0
+            task_completed = False
+            original_request = request
+            current_request = request
+            execution_context = {
+                "files_created": [],
+                "files_modified": [],
+                "actions_taken": [],
+                "discoveries": [],
+                "analysis_results": []
+            }
             
-            request_analysis = await self._analyze_request(request)
-            
-            self.console.print(f"\n[bold green]📋 Request Analysis:[/bold green]")
-            self.console.print(f"• Intent: {request_analysis['intent']}")
-            self.console.print(f"• Scope: {request_analysis['scope']}")
-            self.console.print(f"• Priority: {request_analysis['priority']}")
-            self._flush_console()
-            time.sleep(0.2)
-            
-            # Step 2: Discover relevant files proactively
-            self.console.print(f"\n[bold yellow]📁 Discovering relevant files...[/bold yellow]")
-            self._flush_console()
-            time.sleep(0.15)
-            
-            discovered_files = await self._discover_relevant_files(request, request_analysis)
-            if discovered_files:
-                await self._display_discovered_files(discovered_files)
+            while not task_completed and iteration < max_iterations:
+                iteration += 1
+                self.console.print(f"\n[bold cyan]🔄 Iteration {iteration}[/bold cyan]")
+                self._flush_console()
+                
+                # Step 1: Analyze current request state
+                self.console.print(f"\n[bold yellow]🧠 Analyzing current state...[/bold yellow]")
+                self._flush_console()
+                time.sleep(0.15)
+                
+                request_analysis = await self._analyze_request(current_request)
+                
+                self.console.print(f"\n[bold green]📋 Analysis Results:[/bold green]")
+                self.console.print(f"• Intent: {request_analysis['intent']}")
+                self.console.print(f"• Scope: {request_analysis['scope']}")
+                self.console.print(f"• Priority: {request_analysis['priority']}")
                 self._flush_console()
                 time.sleep(0.2)
-            
-            # Step 3: Analyze discovered code
-            self.console.print(f"\n[bold yellow]🔍 Analyzing discovered code...[/bold yellow]")
-            self._flush_console()
-            time.sleep(0.15)
-            
-            code_analysis = await self._analyze_discovered_code(discovered_files, request)
-            if code_analysis:
-                await self._display_code_analysis(code_analysis)
+                
+                # Step 2: Discover relevant files proactively
+                self.console.print(f"\n[bold yellow]📁 Discovering files for iteration {iteration}...[/bold yellow]")
                 self._flush_console()
-                time.sleep(0.2)
-            
-            # Step 4: Plan autonomous actions
-            self.console.print(f"\n[bold yellow]🎯 Planning actions...[/bold yellow]")
-            self._flush_console()
-            time.sleep(0.15)
-            
-            planned_actions = await self._plan_autonomous_actions(request, discovered_files, code_analysis)
-            if planned_actions:
-                await self._display_planned_actions(planned_actions)
-                self._flush_console()
-                time.sleep(0.2)
-            
-            # Step 5: Get permission and execute actions
-            if planned_actions:
-                permission_granted = await self._get_permission_for_actions(planned_actions)
-                if permission_granted:
-                    self.console.print(f"\n[bold yellow]⚡ Executing actions...[/bold yellow]")
+                time.sleep(0.15)
+                
+                discovered_files = await self._discover_relevant_files(current_request, request_analysis)
+                if discovered_files:
+                    await self._display_discovered_files(discovered_files)
+                    execution_context["discoveries"].extend(discovered_files)
                     self._flush_console()
-                    time.sleep(0.15)
+                    time.sleep(0.2)
+                
+                # Step 3: Analyze discovered code
+                self.console.print(f"\n[bold yellow]🔍 Analyzing code...[/bold yellow]")
+                self._flush_console()
+                time.sleep(0.15)
+                
+                code_analysis = await self._analyze_discovered_code(discovered_files, current_request)
+                if code_analysis:
+                    await self._display_code_analysis(code_analysis)
+                    execution_context["analysis_results"].append(code_analysis)
+                    self._flush_console()
+                    time.sleep(0.2)
+                
+                # Step 4: Plan autonomous actions for this iteration
+                self.console.print(f"\n[bold yellow]🎯 Planning iteration {iteration} actions...[/bold yellow]")
+                self._flush_console()
+                time.sleep(0.15)
+                
+                planned_actions = await self._plan_autonomous_actions_iterative(
+                    current_request, discovered_files, code_analysis, execution_context, iteration
+                )
+                
+                if planned_actions:
+                    await self._display_planned_actions(planned_actions)
+                    self._flush_console()
+                    time.sleep(0.2)
                     
-                    results = await self._execute_autonomous_actions_with_real_files(planned_actions)
-                    return await self._format_execution_results(results)
+                    # Step 5: Execute actions for this iteration
+                    permission_granted = await self._get_permission_for_actions(planned_actions)
+                    if permission_granted:
+                        self.console.print(f"\n[bold yellow]⚡ Executing iteration {iteration} actions...[/bold yellow]")
+                        self._flush_console()
+                        time.sleep(0.15)
+                        
+                        results = await self._execute_autonomous_actions_with_real_files(planned_actions)
+                        execution_context["actions_taken"].extend(results)
+                        
+                        # Track created/modified files
+                        for result in results:
+                            if result.get("success") and result.get("action") == "create":
+                                execution_context["files_created"].append(result.get("file"))
+                            elif result.get("success") and result.get("action") == "modify":
+                                execution_context["files_modified"].append(result.get("file"))
+                        
+                        # Step 6: Evaluate if task is complete
+                        self.console.print(f"\n[bold cyan]📊 Evaluating completion...[/bold cyan]")
+                        self._flush_console()
+                        
+                        completion_evaluation = await self._evaluate_task_completion(
+                            original_request, execution_context, results
+                        )
+                        
+                        task_completed = completion_evaluation.get("completed", False)
+                        current_request = completion_evaluation.get("next_request", current_request)
+                        
+                        if task_completed:
+                            self.console.print(f"[bold green]✅ Task completed successfully![/bold green]")
+                        else:
+                            self.console.print(f"[bold blue]🔄 Continuing to next iteration...[/bold blue]")
+                            self.console.print(f"[dim]Next focus: {current_request}[/dim]")
+                        
+                        self._flush_console()
+                        time.sleep(0.3)
+                    else:
+                        self.console.print("Actions cancelled by user. Exiting agentic loop.")
+                        break
                 else:
-                    return "Actions cancelled by user. I can provide guidance instead if you'd like."
-            else:
-                return "No autonomous actions needed. I can provide guidance or answer questions about the code."
+                    self.console.print(f"[yellow]No more actions planned for iteration {iteration}[/yellow]")
+                    if iteration == 1:
+                        # First iteration with no actions - provide guidance
+                        return "No autonomous actions needed. I can provide guidance or answer questions about the code."
+                    else:
+                        # Subsequent iteration with no actions - task likely complete
+                        task_completed = True
+                        self.console.print(f"[green]✅ Task appears to be complete[/green]")
+            
+            if iteration >= max_iterations:
+                self.console.print(f"[yellow]⚠️ Maximum iterations ({max_iterations}) reached[/yellow]")
+            
+            return await self._format_final_execution_results(execution_context)
                 
         except Exception as e:
             self.logger.error(f"Autonomous processing failed: {e}")
@@ -1295,3 +1358,222 @@ class AutonomousAgent:
                 pairs.append(('# TODO: Fix', '# Fixed:'))
         
         return pairs
+    
+    async def _plan_autonomous_actions_iterative(self, request: str, files: List[FileDiscoveryResult], 
+                                               analysis: Dict[str, Any], execution_context: Dict[str, Any], 
+                                               iteration: int) -> List[AutonomousAction]:
+        """Plan autonomous actions for iterative execution."""
+        actions = []
+        
+        # Consider what has already been done
+        files_created = execution_context.get("files_created", [])
+        files_modified = execution_context.get("files_modified", [])
+        previous_actions = execution_context.get("actions_taken", [])
+        
+        request_lower = request.lower()
+        
+        # First iteration - primary actions
+        if iteration == 1:
+            if "fix" in request_lower or "update" in request_lower or "modify" in request_lower:
+                # Plan modification actions
+                for file in files[:2]:  # Focus on top 2 files
+                    if file.path not in files_modified:
+                        actions.append(AutonomousAction(
+                            action_type="modify",
+                            file_path=file.path,
+                            description=f"Update {file.path} based on request (iteration {iteration})",
+                            estimated_impact="medium"
+                        ))
+            
+            elif "create" in request_lower or "add" in request_lower or "implement" in request_lower:
+                # Plan creation actions based on request analysis
+                file_extension = self._determine_file_extension(request, files)
+                base_name = self._extract_filename_from_request(request) or f"new_file_iter_{iteration}"
+                new_file_path = f"{base_name}{file_extension}"
+                
+                if new_file_path not in files_created:
+                    actions.append(AutonomousAction(
+                        action_type="create",
+                        file_path=new_file_path,
+                        description=f"Create {file_extension[1:]} file based on request (iteration {iteration})",
+                        estimated_impact="medium"
+                    ))
+        
+        # Subsequent iterations - refinement and completion actions
+        else:
+            # Check if we need to continue with modifications
+            if files_modified and ("improve" in request_lower or "enhance" in request_lower):
+                for modified_file in files_modified[-2:]:  # Last 2 modified files
+                    actions.append(AutonomousAction(
+                        action_type="modify",
+                        file_path=modified_file,
+                        description=f"Refine {modified_file} (iteration {iteration})",
+                        estimated_impact="low"
+                    ))
+            
+            # Check if we need to create additional files
+            if files_created and any(word in request_lower for word in ["test", "config", "documentation"]):
+                if iteration == 2:  # Create tests in second iteration
+                    for created_file in files_created[:1]:  # First created file
+                        test_file = self._generate_test_filename(created_file)
+                        if test_file not in files_created:
+                            actions.append(AutonomousAction(
+                                action_type="create",
+                                file_path=test_file,
+                                description=f"Create test file for {created_file}",
+                                estimated_impact="low"
+                            ))
+                
+                elif iteration == 3:  # Create docs in third iteration
+                    readme_file = "README.md"
+                    if readme_file not in files_created:
+                        actions.append(AutonomousAction(
+                            action_type="create",
+                            file_path=readme_file,
+                            description="Create documentation for the implemented feature",
+                            estimated_impact="low"
+                        ))
+        
+        return actions
+    
+    async def _evaluate_task_completion(self, original_request: str, execution_context: Dict[str, Any], 
+                                      latest_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Evaluate if the task is complete and determine next steps."""
+        files_created = execution_context.get("files_created", [])
+        files_modified = execution_context.get("files_modified", [])
+        actions_taken = execution_context.get("actions_taken", [])
+        
+        request_lower = original_request.lower()
+        
+        # Count successful actions in latest results
+        successful_latest = [r for r in latest_results if r.get("success")]
+        failed_latest = [r for r in latest_results if not r.get("success")]
+        
+        # Basic completion criteria
+        has_file_operations = len(files_created) > 0 or len(files_modified) > 0
+        recent_success = len(successful_latest) > 0
+        recent_failures = len(failed_latest) > 0
+        
+        # Simple completion detection based on request type
+        completion_indicators = {
+            "create": len(files_created) > 0,
+            "add": len(files_created) > 0 or len(files_modified) > 0,
+            "implement": len(files_created) > 0 or len(files_modified) > 0,
+            "fix": len(files_modified) > 0,
+            "update": len(files_modified) > 0,
+            "modify": len(files_modified) > 0
+        }
+        
+        # Check if primary intent is satisfied
+        primary_satisfied = False
+        for intent, satisfied in completion_indicators.items():
+            if intent in request_lower and satisfied:
+                primary_satisfied = True
+                break
+        
+        # Determine completion
+        if primary_satisfied and recent_success and not recent_failures:
+            # Task appears complete
+            return {
+                "completed": True,
+                "reason": "Primary objectives achieved successfully",
+                "next_request": None
+            }
+        
+        elif recent_failures and not recent_success:
+            # Recent failures, but might need to retry
+            return {
+                "completed": False,
+                "reason": "Recent failures detected, continuing to resolve",
+                "next_request": f"Fix issues and complete: {original_request}"
+            }
+        
+        elif len(actions_taken) > 8:  # Too many actions taken
+            # Probably going in circles
+            return {
+                "completed": True,
+                "reason": "Maximum reasonable actions taken",
+                "next_request": None
+            }
+        
+        else:
+            # Continue working
+            next_focus = self._determine_next_focus(original_request, execution_context)
+            return {
+                "completed": False,
+                "reason": "Task in progress, continuing",
+                "next_request": next_focus
+            }
+    
+    def _determine_next_focus(self, original_request: str, execution_context: Dict[str, Any]) -> str:
+        """Determine what to focus on in the next iteration."""
+        files_created = execution_context.get("files_created", [])
+        files_modified = execution_context.get("files_modified", [])
+        
+        request_lower = original_request.lower()
+        
+        # If we've created files, focus on enhancing them
+        if files_created and not files_modified:
+            return f"Enhance and improve the created files: {', '.join(files_created[:2])}"
+        
+        # If we've modified files, focus on testing/validation
+        elif files_modified and "test" not in request_lower:
+            return f"Add tests and validation for the modified functionality"
+        
+        # If we have both, focus on documentation
+        elif files_created and files_modified:
+            return f"Document the implemented changes and create README"
+        
+        # Default continuation
+        else:
+            return f"Continue working on: {original_request}"
+    
+    def _generate_test_filename(self, filename: str) -> str:
+        """Generate appropriate test filename for a given file."""
+        path = Path(filename)
+        stem = path.stem
+        extension = path.suffix
+        
+        if extension == '.py':
+            return f"test_{stem}.py"
+        elif extension in ['.js', '.ts']:
+            return f"{stem}.test{extension}"
+        elif extension == '.jsx':
+            return f"{stem}.test.jsx"
+        elif extension == '.tsx':
+            return f"{stem}.test.tsx"
+        else:
+            return f"test_{stem}.txt"
+    
+    async def _format_final_execution_results(self, execution_context: Dict[str, Any]) -> str:
+        """Format final results from the agentic execution."""
+        files_created = execution_context.get("files_created", [])
+        files_modified = execution_context.get("files_modified", [])
+        actions_taken = execution_context.get("actions_taken", [])
+        
+        successful_actions = [a for a in actions_taken if a.get("success")]
+        failed_actions = [a for a in actions_taken if not a.get("success")]
+        
+        summary = f"\n[bold green]🎉 Agentic Execution Complete![/bold green]\n"
+        summary += f"• Total iterations: {len(execution_context.get('analysis_results', []))}\n"
+        summary += f"• Successful actions: {len(successful_actions)}\n"
+        summary += f"• Failed actions: {len(failed_actions)}\n"
+        summary += f"• Files created: {len(files_created)}\n"
+        summary += f"• Files modified: {len(files_modified)}\n"
+        
+        if files_created:
+            summary += f"\n[bold blue]📁 Files Created:[/bold blue]\n"
+            for file in files_created:
+                summary += f"• {file}\n"
+        
+        if files_modified:
+            summary += f"\n[bold blue]✏️ Files Modified:[/bold blue]\n"
+            for file in files_modified:
+                summary += f"• {file}\n"
+        
+        if failed_actions:
+            summary += f"\n[bold red]❌ Failed Actions:[/bold red]\n"
+            for action in failed_actions:
+                summary += f"• {action.get('error', 'Unknown error')}\n"
+        
+        return summary
