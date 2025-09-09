@@ -138,6 +138,21 @@ class ClaudeCodeRegistry:
                     command = parts[1].strip()
                 break
         
+        # If the extracted command is just a single word that doesn't look like a shell command,
+        # it's likely not meant to be executed as a bash command
+        command_words = command.strip().split()
+        if len(command_words) == 1:
+            word = command_words[0].lower()
+            # Check if it's obviously not a shell command
+            non_commands = {
+                "turn", "return", "and", "or", "but", "if", "then", "else",
+                "when", "where", "what", "how", "why", "this", "that", "navigation", 
+                "implement", "create", "build", "make", "help", "please"
+            }
+            if word in non_commands:
+                # Return empty command to prevent execution
+                command = ""
+        
         # Look for background execution indicators
         run_in_background = any(word in request.lower() for word in ["background", "async", "detached"])
         

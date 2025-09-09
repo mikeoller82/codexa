@@ -99,6 +99,22 @@ class BashTool(Tool):
                     tool_name=self.name
                 )
             
+            # Validate command - reject obviously invalid commands
+            command = command.strip()
+            
+            # Check for single words that are not valid shell commands
+            invalid_single_words = {
+                "turn", "return", "and", "or", "but", "if", "then", "else", 
+                "when", "where", "what", "how", "why", "this", "that", "these", "those"
+            }
+            
+            if len(command.split()) == 1 and command.lower() in invalid_single_words:
+                return ToolResult.error_result(
+                    error=f"Invalid command: '{command}' is not a valid shell command. "
+                          "Please provide a proper shell command (e.g., 'ls', 'pwd', 'echo hello').",
+                    tool_name=self.name
+                )
+            
             # Convert timeout from milliseconds to seconds
             timeout_seconds = timeout / 1000.0 if timeout else None
             
