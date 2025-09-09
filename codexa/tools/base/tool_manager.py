@@ -202,9 +202,11 @@ class ToolManager:
             
             if verbose:
                 console.print(f"[dim]   • Request type: {contextual_request.request_type}[/dim]")
-                console.print(f"[dim]   • Complexity: {contextual_request.complexity:.1f}/1.0[/dim]")
-                if contextual_request.entities:
+                console.print(f"[dim]   • Complexity: {contextual_request.estimated_complexity:.1f}/1.0[/dim]")
+                if hasattr(contextual_request, 'entities') and contextual_request.entities:
                     console.print(f"[dim]   • Entities: {', '.join(contextual_request.entities)}[/dim]")
+                if contextual_request.mentioned_files:
+                    console.print(f"[dim]   • Files: {', '.join(contextual_request.mentioned_files[:3])}{'...' if len(contextual_request.mentioned_files) > 3 else ''}[/dim]")
             
             # Check if coordination is enabled and beneficial
             use_coordination = (enable_coordination and 
@@ -463,7 +465,8 @@ class ToolManager:
                                    contextual_request: ContextualRequest,
                                    context: ToolContext,
                                    max_tools: int,
-                                   allow_parallel: bool) -> ExecutionPlan:
+                                   allow_parallel: bool,
+                                   verbose: bool = False) -> ExecutionPlan:
         """Create execution plan for request."""
         # Find candidate tools
         candidates = self.registry.find_tools_for_request(
@@ -541,7 +544,7 @@ class ToolManager:
             requires_user_input=contextual_request.requires_user_input
         )
     
-    async def _execute_plan(self, plan: ExecutionPlan, context: ToolContext) -> ToolResult:
+    async def _execute_plan(self, plan: ExecutionPlan, context: ToolContext, verbose: bool = False) -> ToolResult:
         """Execute the execution plan."""
         self.logger.info(f"Executing plan with {len(plan.tools)} tools")
         
@@ -715,25 +718,44 @@ class ToolManager:
                                          contextual_request: ContextualRequest,
                                          context: ToolContext,
                                          max_tools: int,
-                                         coordination_config: Optional[CoordinationConfig]) -> ToolResult:
+                                         coordination_config: Optional[CoordinationConfig],
+                                         verbose: bool = False) -> ToolResult:
         """Process request using coordinated execution."""
         try:
+            # Import console for verbose output
+            from rich.console import Console
+            console = Console()
+            
+            if verbose:
+                console.print("[dim]🎯 Starting coordinated tool execution...[/dim]")
+            
             # Find candidate tools
+            if verbose:
+                console.print(f"[dim]🔍 Finding candidate tools (max {max_tools})...[/dim]")
             candidates = self.registry.find_tools_for_request(
                 contextual_request, 
                 context, 
                 max_tools * 2  # Get more candidates for better coordination
             )
             
+            if verbose:
+                console.print(f"[dim]   Found {len(candidates)} candidate tools[/dim]")
+            
             # Select best tools with improved threshold logic
             selected_tools = []
+            if verbose:
+                console.print("[dim]⚙️ Selecting best tools for coordination...[/dim]")
             for tool_name, confidence in candidates[:max_tools]:
                 if confidence > 0.05:  # Lowered minimum confidence threshold
                     # Check if tool can actually execute with current context
                     tool = self.registry.get_tool(tool_name)
                     if tool and self._can_tool_execute(tool, context):
                         selected_tools.append(tool_name)
+                        if verbose:
+                            console.print(f"[dim]   ✓ {tool_name} (confidence: {confidence:.2f})[/dim]")
                     else:
+                        if verbose:
+                            console.print(f"[dim]   ✗ {tool_name} (failed validation)[/dim]")
                         self.logger.debug(f"Skipping tool {tool_name} due to context validation in coordination")
             
             # If still no tools found, be more permissive

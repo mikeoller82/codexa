@@ -238,6 +238,16 @@ class EnhancedAIProvider(AIProvider):
             capabilities.update(model_config.capabilities)
         return list(capabilities)
     
+    def _get_system_prompt(self, context: Optional[str] = None) -> str:
+        """Get the system prompt for the enhanced provider."""
+        # Delegate to base provider if it has the method
+        if hasattr(self.base_provider, '_get_system_prompt'):
+            return self.base_provider._get_system_prompt(context)
+        
+        # Fallback to centralized system prompt
+        from .system_prompt import get_codexa_system_prompt
+        return get_codexa_system_prompt(context)
+    
     def get_status(self) -> Dict[str, Any]:
         """Get provider status information."""
         uptime = None

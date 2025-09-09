@@ -239,8 +239,10 @@ class CodexaAgenticLoop:
             Dictionary with 'thinking' and 'plan' keys
         """
         try:
-            # Construct thinking prompt optimized for OpenRouter models
-            thinking_prompt = f"""You are Codexa, an AI coding assistant running in autonomous agentic loop mode.
+            # Construct thinking prompt using Codexa Agent identity
+            thinking_prompt = f"""You are Codexa Agent developed by Codexa Code, an agentic coding AI assistant with access to the developer's codebase through Codexa's world-leading context engine and integrations.
+
+You are currently running in autonomous agentic loop mode.
 
 CURRENT TASK: {context}
 ITERATION: {iteration}/{self.max_iterations}
@@ -831,7 +833,7 @@ TODO: Implement the required functionality.
     ) -> Optional[Dict[str, Any]]:
         """Use LLM to evaluate task completion."""
         try:
-            evaluation_prompt = f"""You are evaluating whether a task was completed successfully.
+            evaluation_prompt = f"""You are Codexa Agent evaluating whether a task was completed successfully.
 
 ORIGINAL TASK: {original_context}
 

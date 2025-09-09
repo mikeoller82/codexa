@@ -183,10 +183,16 @@ class EnhancedCodexaAgent:
     
     def _should_use_agentic_mode(self, request: str) -> bool:
         """Determine if request should use agentic loop mode."""
+        # High-priority agentic keywords that trigger agentic mode by themselves
+        high_priority_keywords = [
+            'systematically', 'comprehensive', 'analyze', 'figure out', 
+            'investigate', 'step by step', 'think through'
+        ]
+        
+        # Additional agentic indicators
         agentic_keywords = [
-            'autonomously', 'iteratively', 'step by step', 'think through',
-            'figure out', 'work through', 'solve', 'debug', 'investigate',
-            'complex', 'comprehensive', 'thorough', 'systematic'
+            'autonomously', 'iteratively', 'work through', 'solve', 'debug',
+            'complex', 'thorough', 'understand', 'improve', 'optimize'
         ]
         
         request_lower = request.lower()
@@ -194,12 +200,16 @@ class EnhancedCodexaAgent:
         # Check for explicit agentic commands
         if any(cmd in request_lower for cmd in ['/agentic', '/loop', '/autonomous', '/think']):
             return True
+        
+        # Check for high-priority keywords (single keyword triggers agentic mode)
+        if any(keyword in request_lower for keyword in high_priority_keywords):
+            return True
             
-        # Check for agentic keywords
+        # Check for agentic keywords (need 2 or more)
         keyword_count = sum(1 for keyword in agentic_keywords if keyword in request_lower)
         
         # Use agentic mode for complex requests or multiple agentic indicators
-        return keyword_count >= 2 or len(request) > 100 or '?' in request
+        return keyword_count >= 2 or len(request) > 100
     
     async def _process_request_agentic(self, request: str):
         """Process request using agentic loop with verbose feedback."""
