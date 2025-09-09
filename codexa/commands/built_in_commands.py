@@ -617,6 +617,15 @@ class BuiltInCommands:
             AutonomousCommands.register_all(registry)
         except ImportError as e:
             print(f"Warning: Could not import autonomous commands: {e}")
+        
+        # Import and register agentic loop commands
+        try:
+            from .agentic_commands import AGENTIC_COMMANDS
+            for agentic_cmd_class in AGENTIC_COMMANDS:
+                agentic_cmd = agentic_cmd_class()
+                commands.append(agentic_cmd)
+        except ImportError as e:
+            print(f"Warning: Could not import agentic commands: {e}")
 
         # Import and register search commands
         try:

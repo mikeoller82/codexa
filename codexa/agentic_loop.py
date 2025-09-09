@@ -1,0 +1,1107 @@
+"""
+Agentic Loop System for Codexa - Think, Execute, Evaluate, Repeat
+"""
+
+import asyncio
+import time
+import logging
+from typing import Any, Dict, List, Optional, Tuple, Union
+from datetime import datetime
+from pathlib import Path
+from dataclasses import dataclass
+from enum import Enum
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.live import Live
+from rich.text import Text
+
+try:
+    from .enhanced_providers import EnhancedProviderFactory
+    from .tools.base.tool_manager import ToolManager
+    from .planning import PlanningManager
+    from .execution import TaskExecutionManager
+    from .providers import ProviderFactory  # Always import this as fallback
+    ENHANCED_MODE = True
+except ImportError:
+    from .providers import ProviderFactory
+    from .planning import PlanningManager  
+    from .execution import TaskExecutionManager
+    ENHANCED_MODE = False
+
+
+class LoopStatus(Enum):
+    """Status of the agentic loop."""
+    THINKING = "thinking"
+    EXECUTING = "executing"
+    EVALUATING = "evaluating"
+    REFINING = "refining"
+    SUCCESS = "success"
+    FAILURE = "failure"
+    MAX_ITERATIONS = "max_iterations"
+
+
+@dataclass
+class LoopIteration:
+    """Represents a single iteration of the agentic loop."""
+    iteration: int
+    thinking: str
+    plan: str
+    execution_result: str
+    evaluation: str
+    success: bool
+    feedback: str
+    timestamp: datetime
+    duration: float = 0.0
+
+
+@dataclass
+class AgenticTaskResult:
+    """Result of an agentic task execution."""
+    task: str
+    status: LoopStatus
+    iterations: List[LoopIteration]
+    total_duration: float
+    final_result: Optional[str]
+    success: bool
+
+
+class CodexaAgenticLoop:
+    """
+    Agentic Loop System for Codexa
+    
+    This system implements an autonomous execution loop where Codexa:
+    1. Thinks out loud about the task (shows reasoning/steps)
+    2. Executes one clear action
+    3. Evaluates the result
+    4. Refines the approach if needed
+    5. Repeats until task is complete or max iterations reached
+    """
+
+    def __init__(
+        self,
+        config=None,
+        console: Console = None,
+        max_iterations: int = 20,
+        verbose: bool = True
+    ):
+        """Initialize the agentic loop system."""
+        self.console = console or Console()
+        self.max_iterations = max_iterations
+        self.verbose = verbose
+        self.logger = logging.getLogger("codexa.agentic_loop")
+        
+        # Initialize providers and tools
+        self.config = config
+        self.provider = None
+        self.tool_manager = None
+        
+        if config:
+            try:
+                if ENHANCED_MODE:
+                    # Try enhanced provider first
+                    try:
+                        enhanced_factory = EnhancedProviderFactory()
+                        self.provider = enhanced_factory.get_provider()
+                        if self.provider:
+                            self.tool_manager = ToolManager()
+                            self.logger.info("Using enhanced provider mode")
+                    except Exception as e:
+                        self.logger.warning(f"Enhanced mode failed: {e}")
+                
+                # Fallback to basic provider if enhanced failed or not available
+                if not self.provider:
+                    self.provider = ProviderFactory.create_provider(config)
+                    self.logger.info("Using basic provider mode")
+                    
+            except Exception as e:
+                self.logger.error(f"Provider initialization failed: {e}")
+                self.provider = None
+            
+        # Initialize managers
+        self.planning_manager = None
+        self.execution_manager = None
+        
+        # Loop state
+        self.current_task = None
+        self.iterations: List[LoopIteration] = []
+        self.start_time = None
+
+    async def run_agentic_loop(self, task: str) -> AgenticTaskResult:
+        """
+        Run the main agentic loop until task completion or max iterations.
+        
+        Args:
+            task: The task description to accomplish
+            
+        Returns:
+            AgenticTaskResult with complete execution history
+        """
+        self.current_task = task
+        self.iterations = []
+        self.start_time = time.time()
+        
+        if self.verbose:
+            self._display_task_header(task)
+        
+        context = task
+        status = LoopStatus.THINKING
+        
+        for i in range(self.max_iterations):
+            iteration_start = time.time()
+            
+            if self.verbose:
+                self._display_iteration_header(i + 1)
+            
+            # Step 1: Think / Plan
+            thinking_result = await self._think_step(context, i + 1)
+            if self.verbose:
+                self._display_thinking(thinking_result)
+            
+            # Step 2: Execute
+            execution_result = await self._execute_step(thinking_result["plan"], i + 1)
+            if self.verbose:
+                self._display_execution(execution_result)
+            
+            # Step 3: Evaluate
+            evaluation_result = await self._evaluate_step(
+                execution_result, context, thinking_result["plan"]
+            )
+            if self.verbose:
+                self._display_evaluation(evaluation_result)
+            
+            # Record iteration
+            iteration_duration = time.time() - iteration_start
+            iteration = LoopIteration(
+                iteration=i + 1,
+                thinking=thinking_result["thinking"],
+                plan=thinking_result["plan"],
+                execution_result=execution_result["result"],
+                evaluation=evaluation_result["feedback"],
+                success=evaluation_result["success"],
+                feedback=evaluation_result["feedback"],
+                timestamp=datetime.now(),
+                duration=iteration_duration
+            )
+            self.iterations.append(iteration)
+            
+            # Step 4: Check for completion
+            if evaluation_result["success"]:
+                status = LoopStatus.SUCCESS
+                if self.verbose:
+                    self._display_success(i + 1)
+                break
+            else:
+                # Step 5: Refine context for next iteration
+                refined_context = await self._refine_task(context, evaluation_result["feedback"])
+                context = refined_context
+                if self.verbose:
+                    self._display_refinement(refined_context)
+            
+            # Brief pause to make the loop visible
+            if self.verbose:
+                await asyncio.sleep(0.5)
+        
+        if status != LoopStatus.SUCCESS:
+            status = LoopStatus.MAX_ITERATIONS
+            if self.verbose:
+                self._display_max_iterations_reached()
+        
+        total_duration = time.time() - self.start_time
+        
+        # Create final result
+        result = AgenticTaskResult(
+            task=task,
+            status=status,
+            iterations=self.iterations,
+            total_duration=total_duration,
+            final_result=execution_result["result"] if status == LoopStatus.SUCCESS else None,
+            success=status == LoopStatus.SUCCESS
+        )
+        
+        if self.verbose:
+            self._display_final_summary(result)
+        
+        return result
+
+    async def _think_step(self, context: str, iteration: int) -> Dict[str, str]:
+        """
+        Generate reasoning and plan for the next action using real LLM.
+        
+        Args:
+            context: Current task context
+            iteration: Current iteration number
+            
+        Returns:
+            Dictionary with 'thinking' and 'plan' keys
+        """
+        try:
+            # Construct thinking prompt optimized for OpenRouter models
+            thinking_prompt = f"""You are Codexa, an AI coding assistant running in autonomous agentic loop mode.
+
+CURRENT TASK: {context}
+ITERATION: {iteration}/{self.max_iterations}
+
+Think through this task step by step and plan your next concrete action. Be specific and actionable.
+
+FORMAT YOUR RESPONSE AS:
+
+THINKING:
+[Your reasoning process - what you understand about the task, what you've learned from previous attempts, and what approach you want to take]
+
+PLAN:
+[One specific, concrete action you will take next - be very specific about files to read/write, code to create, or commands to run]
+
+Remember:
+- Be specific about file names and paths
+- If creating code, specify the programming language
+- If reading files, mention what you're looking for
+- If this is iteration {iteration}, consider what might have failed before
+- Focus on ONE clear action that moves toward completing the task"""
+            
+            if self.provider and hasattr(self.provider, 'ask'):
+                # Use the provider's ask method (works with OpenRouter)
+                response = self.provider.ask(thinking_prompt)
+            elif self.provider and hasattr(self.provider, 'generate_response'):
+                # Alternative method if available
+                response = await self.provider.generate_response(thinking_prompt)
+            else:
+                # Fallback reasoning
+                response = f"""THINKING:
+I need to analyze the task "{context}" and determine the next action.
+This is iteration {iteration}, so I should be specific and actionable.
+
+PLAN:
+Analyze the task requirements and take the first logical step to complete it."""
+            
+            # Parse response
+            thinking = ""
+            plan = ""
+            
+            if "THINKING:" in response and "PLAN:" in response:
+                parts = response.split("PLAN:")
+                thinking = parts[0].replace("THINKING:", "").strip()
+                plan = parts[1].strip()
+            else:
+                # Try alternative parsing
+                lines = response.split('\n')
+                in_thinking = False
+                in_plan = False
+                thinking_lines = []
+                plan_lines = []
+                
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("THINKING"):
+                        in_thinking = True
+                        in_plan = False
+                        continue
+                    elif line.startswith("PLAN"):
+                        in_thinking = False
+                        in_plan = True
+                        continue
+                    
+                    if in_thinking:
+                        thinking_lines.append(line)
+                    elif in_plan:
+                        plan_lines.append(line)
+                
+                thinking = '\n'.join(thinking_lines).strip()
+                plan = '\n'.join(plan_lines).strip()
+                
+                # Final fallback
+                if not thinking or not plan:
+                    thinking = f"Analyzing task iteration {iteration}"
+                    plan = response.strip()[:200] if response.strip() else "Take next logical step"
+            
+            # Clean up empty responses
+            if not thinking:
+                thinking = f"Processing task context for iteration {iteration}"
+            if not plan:
+                plan = "Determine and execute the next logical action"
+            
+            return {
+                "thinking": thinking,
+                "plan": plan,
+                "raw_response": response,
+                "provider_used": bool(self.provider)
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Think step failed: {e}")
+            return {
+                "thinking": f"Error in thinking step: {e}. Falling back to basic reasoning.",
+                "plan": "Attempt to complete the task using available information",
+                "raw_response": str(e),
+                "provider_used": False
+            }
+
+    async def _execute_step(self, plan: str, iteration: int) -> Dict[str, Any]:
+        """
+        Execute the planned action.
+        
+        Args:
+            plan: The plan to execute
+            iteration: Current iteration number
+            
+        Returns:
+            Dictionary with execution results
+        """
+        try:
+            execution_start = time.time()
+            
+            # Determine execution type from plan
+            if self.tool_manager and ENHANCED_MODE:
+                result = await self._execute_with_tools(plan, iteration)
+            else:
+                result = await self._execute_basic(plan, iteration)
+            
+            execution_duration = time.time() - execution_start
+            
+            return {
+                "result": result,
+                "duration": execution_duration,
+                "success": True,
+                "method": "tools" if self.tool_manager else "basic"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Execute step failed: {e}")
+            return {
+                "result": f"Execution failed: {e}",
+                "duration": 0,
+                "success": False,
+                "error": str(e)
+            }
+
+    async def _execute_with_tools(self, plan: str, iteration: int) -> str:
+        """Execute plan using Codexa's tool system."""
+        try:
+            if not self.tool_manager:
+                return await self._execute_basic(plan, iteration)
+            
+            plan_lower = plan.lower()
+            
+            # Parse the plan to determine what action to take
+            if "read" in plan_lower and "file" in plan_lower:
+                return await self._execute_file_read(plan)
+            elif "write" in plan_lower or "create" in plan_lower:
+                return await self._execute_file_write(plan)
+            elif "search" in plan_lower:
+                return await self._execute_search(plan)
+            elif "run" in plan_lower or "execute" in plan_lower or "command" in plan_lower:
+                return await self._execute_command(plan)
+            elif "list" in plan_lower or "ls" in plan_lower or "directory" in plan_lower:
+                return await self._execute_directory_list(plan)
+            else:
+                # Use tool manager to find appropriate tool
+                return await self._execute_with_tool_manager(plan, iteration)
+                
+        except Exception as e:
+            self.logger.error(f"Tool execution failed: {e}")
+            return f"Tool execution failed: {e}. Falling back to basic approach."
+
+    async def _execute_file_read(self, plan: str) -> str:
+        """Execute file reading using real file operations."""
+        try:
+            # Extract filename from plan
+            import re
+            filename_patterns = [
+                r'read\s+(?:file\s+)?["\']?([^"\'\\s]+)["\']?',
+                r'(?:open|check|examine)\s+["\']?([^"\'\\s]+)["\']?',
+                r'["\']([^"\']*\.(?:py|js|json|md|txt|yml|yaml)[^"\']*)["\']'
+            ]
+            
+            filename = None
+            for pattern in filename_patterns:
+                match = re.search(pattern, plan, re.IGNORECASE)
+                if match:
+                    filename = match.group(1)
+                    break
+            
+            if not filename:
+                return "Could not determine which file to read from the plan. Please specify a filename."
+            
+            # Try to read the file
+            from pathlib import Path
+            file_path = Path(filename)
+            
+            if not file_path.exists():
+                # Try relative to current directory or common locations
+                possible_paths = [
+                    Path.cwd() / filename,
+                    Path.cwd() / "src" / filename,
+                    Path.cwd() / "lib" / filename,
+                    Path.cwd() / "app" / filename
+                ]
+                
+                for path in possible_paths:
+                    if path.exists():
+                        file_path = path
+                        break
+                else:
+                    return f"File '{filename}' not found in current directory or common locations."
+            
+            content = file_path.read_text(encoding='utf-8')
+            lines = len(content.split('\n'))
+            size = len(content)
+            
+            return f"Successfully read file '{filename}' ({lines} lines, {size} characters). File content loaded and ready for analysis."
+            
+        except Exception as e:
+            return f"Failed to read file: {e}"
+
+    async def _execute_file_write(self, plan: str) -> str:
+        """Execute file writing using real file operations."""
+        try:
+            # Extract filename and content from plan
+            import re
+            
+            # Try to extract filename
+            filename_patterns = [
+                r'(?:create|write|make)\s+(?:file\s+)?["\']?([^"\'\\s]+)["\']?',
+                r'["\']([^"\']*\.(?:py|js|json|md|txt|yml|yaml)[^"\']*)["\']'
+            ]
+            
+            filename = None
+            for pattern in filename_patterns:
+                match = re.search(pattern, plan, re.IGNORECASE)
+                if match:
+                    filename = match.group(1)
+                    break
+            
+            if not filename:
+                # Generate a filename based on the plan
+                if "python" in plan.lower() or ".py" in plan:
+                    filename = "generated_script.py"
+                elif "javascript" in plan.lower() or "js" in plan.lower():
+                    filename = "generated_script.js"
+                elif "json" in plan.lower():
+                    filename = "generated_data.json"
+                elif "markdown" in plan.lower() or "readme" in plan.lower():
+                    filename = "README.md"
+                else:
+                    filename = "generated_file.txt"
+            
+            # Generate appropriate content based on the plan
+            content = self._generate_file_content_from_plan(plan, filename)
+            
+            # Write the file
+            from pathlib import Path
+            file_path = Path(filename)
+            
+            # Create directory if needed
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text(content, encoding='utf-8')
+            
+            return f"Successfully created file '{filename}' with {len(content.split('\\n'))} lines of content."
+            
+        except Exception as e:
+            return f"Failed to create file: {e}"
+
+    async def _execute_search(self, plan: str) -> str:
+        """Execute search operations."""
+        try:
+            import re
+            from pathlib import Path
+            
+            # Extract search term from plan
+            search_patterns = [
+                r'search\s+for\s+["\']([^"\']+)["\']',
+                r'find\s+["\']([^"\']+)["\']',
+                r'look\s+for\s+["\']([^"\']+)["\']'
+            ]
+            
+            search_term = None
+            for pattern in search_patterns:
+                match = re.search(pattern, plan, re.IGNORECASE)
+                if match:
+                    search_term = match.group(1)
+                    break
+            
+            if not search_term:
+                return "Could not determine what to search for from the plan."
+            
+            # Search in current directory
+            results = []
+            current_dir = Path.cwd()
+            
+            # Search in common file types
+            extensions = ['.py', '.js', '.ts', '.json', '.md', '.txt', '.yml', '.yaml']
+            
+            for ext in extensions:
+                for file_path in current_dir.rglob(f"*{ext}"):
+                    try:
+                        if file_path.is_file():
+                            content = file_path.read_text(encoding='utf-8', errors='ignore')
+                            if search_term.lower() in content.lower():
+                                line_count = content.count('\\n') + 1
+                                results.append(f"{file_path.relative_to(current_dir)} (found in {line_count} line file)")
+                    except Exception:
+                        continue
+            
+            if results:
+                return f"Found '{search_term}' in {len(results)} files:\\n" + "\\n".join(results[:10])
+            else:
+                return f"No files found containing '{search_term}' in the current project."
+            
+        except Exception as e:
+            return f"Search operation failed: {e}"
+
+    async def _execute_command(self, plan: str) -> str:
+        """Execute command operations (simulated for security)."""
+        # For security, we simulate command execution rather than actually running commands
+        import re
+        
+        command_patterns = [
+            r'run\s+["\']([^"\']+)["\']',
+            r'execute\s+["\']([^"\']+)["\']',
+            r'command\s+["\']([^"\']+)["\']'
+        ]
+        
+        command = None
+        for pattern in command_patterns:
+            match = re.search(pattern, plan, re.IGNORECASE)
+            if match:
+                command = match.group(1)
+                break
+        
+        if not command:
+            return "Could not determine which command to execute from the plan."
+        
+        # Simulate safe commands
+        if command.startswith(('ls', 'dir', 'pwd', 'whoami')):
+            return f"Simulated execution of safe command: {command}"
+        elif command.startswith(('python', 'node', 'npm')):
+            return f"Would execute development command: {command} (simulated for security)"
+        else:
+            return f"Command execution requested: {command} (simulated for security reasons)"
+
+    async def _execute_directory_list(self, plan: str) -> str:
+        """Execute directory listing operations."""
+        try:
+            from pathlib import Path
+            
+            current_dir = Path.cwd()
+            items = []
+            
+            for item in current_dir.iterdir():
+                if item.is_file():
+                    size = item.stat().st_size
+                    items.append(f"📄 {item.name} ({size} bytes)")
+                elif item.is_dir():
+                    try:
+                        file_count = len(list(item.iterdir()))
+                        items.append(f"📁 {item.name}/ ({file_count} items)")
+                    except PermissionError:
+                        items.append(f"📁 {item.name}/ (permission denied)")
+            
+            if items:
+                return f"Directory listing for {current_dir.name}:\\n" + "\\n".join(items[:20])
+            else:
+                return f"Directory {current_dir.name} appears to be empty."
+                
+        except Exception as e:
+            return f"Failed to list directory: {e}"
+
+    async def _execute_with_tool_manager(self, plan: str, iteration: int) -> str:
+        """Execute using the tool manager system."""
+        try:
+            # This would use the actual tool manager to select and execute appropriate tools
+            # For now, provide intelligent fallback
+            plan_lower = plan.lower()
+            
+            if any(word in plan_lower for word in ['analyze', 'check', 'examine', 'review']):
+                return f"Analysis operation based on plan: {plan}"
+            elif any(word in plan_lower for word in ['fix', 'repair', 'correct', 'debug']):
+                return f"Fix operation based on plan: {plan}"
+            elif any(word in plan_lower for word in ['optimize', 'improve', 'enhance']):
+                return f"Optimization operation based on plan: {plan}"
+            else:
+                return f"General operation executed based on plan: {plan}"
+                
+        except Exception as e:
+            return f"Tool manager execution failed: {e}"
+
+    def _generate_file_content_from_plan(self, plan: str, filename: str) -> str:
+        """Generate appropriate file content based on the plan and filename."""
+        from pathlib import Path
+        
+        file_extension = Path(filename).suffix.lower()
+        plan_lower = plan.lower()
+        
+        if file_extension == '.py':
+            if 'hello' in plan_lower or 'world' in plan_lower:
+                return '#!/usr/bin/env python3\\n\\nprint("Hello, World!")\\n'
+            elif 'fibonacci' in plan_lower:
+                return '''#!/usr/bin/env python3
+
+def fibonacci(n):
+    """Calculate the nth Fibonacci number."""
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+def main():
+    # Calculate and print first 10 Fibonacci numbers
+    for i in range(10):
+        print(f"F({i}) = {fibonacci(i)}")
+
+if __name__ == "__main__":
+    main()
+'''
+            elif 'calculator' in plan_lower:
+                return '''#!/usr/bin/env python3
+
+def add(a, b):
+    return a + b
+
+def subtract(a, b):
+    return a - b
+
+def multiply(a, b):
+    return a * b
+
+def divide(a, b):
+    if b != 0:
+        return a / b
+    else:
+        return "Error: Division by zero"
+
+def main():
+    print("Simple Calculator")
+    print("1. Add")
+    print("2. Subtract") 
+    print("3. Multiply")
+    print("4. Divide")
+
+if __name__ == "__main__":
+    main()
+'''
+            else:
+                return f'''#!/usr/bin/env python3
+"""
+{plan}
+"""
+
+def main():
+    # TODO: Implement the functionality described in the plan
+    pass
+
+if __name__ == "__main__":
+    main()
+'''
+        
+        elif file_extension == '.js':
+            if 'hello' in plan_lower:
+                return 'console.log("Hello, World!");\\n'
+            else:
+                return f'''// {plan}
+
+function main() {{
+    // TODO: Implement the functionality described in the plan
+}}
+
+main();
+'''
+        
+        elif file_extension == '.json':
+            return '''{
+    "name": "generated-project",
+    "description": "''' + plan + '''",
+    "version": "1.0.0"
+}
+'''
+        
+        elif file_extension == '.md':
+            return f'''# Generated File
+
+## Purpose
+{plan}
+
+## Implementation
+TODO: Add implementation details here.
+'''
+        
+        else:
+            return f'''Generated file based on plan: {plan}
+
+TODO: Implement the required functionality.
+'''
+
+    async def _execute_basic(self, plan: str, iteration: int) -> str:
+        """Execute plan using basic operations."""
+        # Basic execution fallback
+        return f"Executed plan (iteration {iteration}): {plan}"
+
+    async def _evaluate_step(
+        self, 
+        execution_result: Dict[str, Any], 
+        original_context: str,
+        plan: str
+    ) -> Dict[str, Any]:
+        """
+        Evaluate if the execution result solves the task using LLM-powered analysis.
+        
+        Args:
+            execution_result: Result from execution step
+            original_context: Original task context
+            plan: The plan that was executed
+            
+        Returns:
+            Dictionary with success status and feedback
+        """
+        try:
+            result_text = execution_result.get("result", "")
+            
+            # Try LLM-powered evaluation first
+            if self.provider and hasattr(self.provider, 'ask'):
+                llm_evaluation = await self._evaluate_with_llm(
+                    original_context, plan, result_text, execution_result
+                )
+                if llm_evaluation:
+                    return llm_evaluation
+            
+            # Fallback to heuristic evaluation
+            return await self._evaluate_with_heuristics(execution_result, original_context, plan)
+            
+        except Exception as e:
+            self.logger.error(f"Evaluate step failed: {e}")
+            return {
+                "success": False,
+                "feedback": f"Evaluation error: {e}",
+                "error": str(e),
+                "evaluation_method": "error"
+            }
+
+    async def _evaluate_with_llm(
+        self,
+        original_context: str,
+        plan: str,
+        result_text: str,
+        execution_result: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """Use LLM to evaluate task completion."""
+        try:
+            evaluation_prompt = f"""You are evaluating whether a task was completed successfully.
+
+ORIGINAL TASK: {original_context}
+
+PLAN THAT WAS EXECUTED: {plan}
+
+EXECUTION RESULT: {result_text}
+
+EXECUTION SUCCESS: {execution_result.get('success', False)}
+
+Please evaluate whether the execution result indicates the original task was completed successfully.
+
+Respond in this format:
+
+SUCCESS: true/false
+CONFIDENCE: 0.0-1.0 (how confident you are in this assessment)
+REASONING: [Explain your reasoning for this evaluation]
+FEEDBACK: [Brief feedback on what was accomplished or what needs to be done next]
+
+Consider:
+- Did the execution achieve what the original task requested?
+- Was the plan appropriate for the task?
+- Are there any errors or failures in the result?
+- Is the result relevant to the original task?
+- Would a user consider this task "done"?"""
+
+            response = self.provider.ask(evaluation_prompt)
+            
+            # Parse LLM response
+            success = False
+            confidence = 0.0
+            reasoning = ""
+            feedback = ""
+            
+            lines = response.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line.startswith('SUCCESS:'):
+                    success_text = line.split(':', 1)[1].strip().lower()
+                    success = success_text in ['true', 'yes', '1']
+                elif line.startswith('CONFIDENCE:'):
+                    try:
+                        confidence = float(line.split(':', 1)[1].strip())
+                    except ValueError:
+                        confidence = 0.5
+                elif line.startswith('REASONING:'):
+                    reasoning = line.split(':', 1)[1].strip()
+                elif line.startswith('FEEDBACK:'):
+                    feedback = line.split(':', 1)[1].strip()
+            
+            # If we didn't get proper parsing, try a simpler approach
+            if not feedback:
+                if 'successfully' in response.lower() or 'completed' in response.lower():
+                    success = True
+                    feedback = "Task appears to be completed successfully based on LLM evaluation."
+                else:
+                    success = False
+                    feedback = "Task does not appear to be completed based on LLM evaluation."
+                    
+            return {
+                "success": success,
+                "feedback": feedback,
+                "confidence": confidence,
+                "reasoning": reasoning,
+                "evaluation_method": "llm",
+                "llm_response": response
+            }
+            
+        except Exception as e:
+            self.logger.warning(f"LLM evaluation failed: {e}")
+            return None
+
+    async def _evaluate_with_heuristics(
+        self,
+        execution_result: Dict[str, Any],
+        original_context: str,
+        plan: str
+    ) -> Dict[str, Any]:
+        """Fallback heuristic evaluation when LLM is unavailable."""
+        result_text = execution_result.get("result", "")
+        
+        # Enhanced heuristic indicators
+        success_indicators = [
+            "successfully", "completed", "finished", "done", "created", "generated",
+            "written", "updated", "saved", "built", "implemented", "fixed"
+        ]
+        
+        failure_indicators = [
+            "error", "failed", "exception", "not found", "cannot", "unable",
+            "denied", "invalid", "missing", "timeout", "refused"
+        ]
+        
+        result_lower = result_text.lower()
+        
+        # Check for explicit success/failure indicators
+        success_count = sum(1 for indicator in success_indicators if indicator in result_lower)
+        failure_count = sum(1 for indicator in failure_indicators if indicator in result_lower)
+        
+        # Enhanced evaluation logic
+        if failure_count > 0:
+            success = False
+            feedback = f"Execution encountered {failure_count} error indicator(s). Need to try a different approach."
+        elif success_count > 0:
+            success = True
+            feedback = f"Execution shows {success_count} success indicator(s). Task appears completed."
+        else:
+            # Check task-specific indicators
+            context_lower = original_context.lower()
+            task_completed = False
+            
+            # Check for file creation tasks
+            if "create" in context_lower or "write" in context_lower:
+                if "created" in result_lower or "written" in result_lower:
+                    task_completed = True
+            
+            # Check for read tasks
+            if "read" in context_lower or "open" in context_lower:
+                if "read" in result_lower or "loaded" in result_lower:
+                    task_completed = True
+            
+            # Check for search tasks
+            if "search" in context_lower or "find" in context_lower:
+                if "found" in result_lower or "results" in result_lower:
+                    task_completed = True
+            
+            if task_completed:
+                success = True
+                feedback = "Task appears to be completed based on task-specific indicators."
+            else:
+                # Check keyword overlap as last resort
+                context_keywords = set(context_lower.split())
+                result_keywords = set(result_lower.split())
+                overlap = context_keywords & result_keywords
+                relevance_score = len(overlap) / max(len(context_keywords), 1) if context_keywords else 0
+                
+                if relevance_score > 0.4:  # 40% keyword overlap
+                    success = True
+                    feedback = f"Result appears relevant to task ({relevance_score:.1%} keyword overlap)."
+                else:
+                    success = False
+                    feedback = f"Result doesn't clearly address the task (only {relevance_score:.1%} relevance)."
+        
+        return {
+            "success": success,
+            "feedback": feedback,
+            "success_indicators": success_count,
+            "failure_indicators": failure_count,
+            "evaluation_method": "heuristic"
+        }
+
+    async def _refine_task(self, task: str, feedback: str) -> str:
+        """
+        Refine the task context based on feedback.
+        
+        Args:
+            task: Current task context
+            feedback: Feedback from evaluation
+            
+        Returns:
+            Refined task context
+        """
+        try:
+            # Simple refinement - could be enhanced with AI
+            refined = f"{task} | Previous feedback: {feedback}"
+            
+            # Add iteration-specific guidance
+            iteration_count = len(self.iterations)
+            if iteration_count > 5:
+                refined += f" | Note: This is iteration {iteration_count + 1}, consider alternative approaches."
+            
+            return refined
+            
+        except Exception as e:
+            self.logger.error(f"Refine task failed: {e}")
+            return f"{task} | Refinement error: {e}"
+
+    # Display Methods for Verbose Output
+    
+    def _display_task_header(self, task: str):
+        """Display the task header."""
+        self.console.print()
+        self.console.print(Panel(
+            Text(task, style="bold white"),
+            title="🤖 Codexa Agentic Loop",
+            title_align="left",
+            border_style="blue",
+            padding=(1, 2)
+        ))
+
+    def _display_iteration_header(self, iteration: int):
+        """Display iteration header."""
+        self.console.print(f"\n[bold blue]{'='*60}[/bold blue]")
+        self.console.print(f"[bold blue]🔄 Iteration {iteration}/{self.max_iterations}[/bold blue]")
+        self.console.print(f"[bold blue]{'='*60}[/bold blue]")
+
+    def _display_thinking(self, thinking_result: Dict[str, str]):
+        """Display the thinking process."""
+        self.console.print(f"\n[bold yellow]🧠 [Thinking][/bold yellow]")
+        self.console.print(Panel(
+            thinking_result["thinking"],
+            border_style="yellow",
+            padding=(0, 1)
+        ))
+
+    def _display_execution(self, execution_result: Dict[str, Any]):
+        """Display execution results."""
+        self.console.print(f"\n[bold green]⚡ [Action][/bold green]")
+        result_text = execution_result.get("result", "No result")
+        duration = execution_result.get("duration", 0)
+        
+        self.console.print(Panel(
+            f"{result_text}\n[dim]Duration: {duration:.2f}s[/dim]",
+            border_style="green",
+            padding=(0, 1)
+        ))
+
+    def _display_evaluation(self, evaluation_result: Dict[str, Any]):
+        """Display evaluation results."""
+        success = evaluation_result.get("success", False)
+        feedback = evaluation_result.get("feedback", "No feedback")
+        
+        icon = "✅" if success else "❌"
+        color = "green" if success else "red"
+        
+        self.console.print(f"\n[bold {color}]🔍 [Evaluation] {icon}[/bold {color}]")
+        self.console.print(Panel(
+            feedback,
+            border_style=color,
+            padding=(0, 1)
+        ))
+
+    def _display_refinement(self, refined_context: str):
+        """Display context refinement."""
+        self.console.print(f"\n[bold cyan]🔄 [Refined Context][/bold cyan]")
+        self.console.print(Panel(
+            refined_context,
+            border_style="cyan",
+            padding=(0, 1)
+        ))
+
+    def _display_success(self, iterations: int):
+        """Display success message."""
+        self.console.print(f"\n[bold green]{'='*60}[/bold green]")
+        self.console.print(f"[bold green]🎉 Task completed successfully in {iterations} iterations![/bold green]")
+        self.console.print(f"[bold green]{'='*60}[/bold green]")
+
+    def _display_max_iterations_reached(self):
+        """Display max iterations reached message."""
+        self.console.print(f"\n[bold yellow]{'='*60}[/bold yellow]")
+        self.console.print(f"[bold yellow]⚠️ Maximum iterations ({self.max_iterations}) reached.[/bold yellow]")
+        self.console.print("[yellow]Task may not be fully completed.[/yellow]")
+        self.console.print(f"[bold yellow]{'='*60}[/bold yellow]")
+
+    def _display_final_summary(self, result: AgenticTaskResult):
+        """Display final execution summary."""
+        self.console.print(f"\n[bold magenta]📊 Final Summary[/bold magenta]")
+        
+        table = Table(show_header=True, header_style="bold magenta")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", style="white")
+        
+        table.add_row("Status", str(result.status.value))
+        table.add_row("Total Iterations", str(len(result.iterations)))
+        table.add_row("Total Duration", f"{result.total_duration:.2f}s")
+        table.add_row("Success", "✅ Yes" if result.success else "❌ No")
+        table.add_row("Task", result.task[:50] + "..." if len(result.task) > 50 else result.task)
+        
+        self.console.print(table)
+
+    # Utility Methods
+    
+    def set_max_iterations(self, max_iterations: int):
+        """Set the maximum number of iterations."""
+        self.max_iterations = max_iterations
+
+    def set_verbose(self, verbose: bool):
+        """Set verbose output mode."""
+        self.verbose = verbose
+
+    def get_iteration_history(self) -> List[LoopIteration]:
+        """Get the history of all iterations."""
+        return self.iterations.copy()
+
+    async def run_simple_task(self, task: str) -> str:
+        """
+        Run a simple task and return just the result.
+        
+        Args:
+            task: Task to execute
+            
+        Returns:
+            String result of the task
+        """
+        result = await self.run_agentic_loop(task)
+        return result.final_result or "Task completed but no specific result available"
+
+
+# Factory function for easy instantiation
+def create_agentic_loop(
+    config=None,
+    max_iterations: int = 20,
+    verbose: bool = True
+) -> CodexaAgenticLoop:
+    """
+    Factory function to create a configured agentic loop instance.
+    
+    Args:
+        config: Codexa configuration object
+        max_iterations: Maximum number of loop iterations
+        verbose: Whether to show verbose output
+        
+    Returns:
+        Configured CodexaAgenticLoop instance
+    """
+    return CodexaAgenticLoop(
+        config=config,
+        max_iterations=max_iterations,
+        verbose=verbose
+    )

@@ -15,6 +15,14 @@ from .tool_performance_monitor import ToolPerformanceMonitor
 from .tool_coordinator import ToolCoordinator
 from .ai_error_handler import AIErrorHandler
 
+# Claude Code integration
+try:
+    from ..claude_code.claude_code_registry import claude_code_registry
+    CLAUDE_CODE_AVAILABLE = True
+except ImportError:
+    CLAUDE_CODE_AVAILABLE = False
+    claude_code_registry = None
+
 
 @dataclass
 class ExecutionPlan:
@@ -96,6 +104,14 @@ class ToolManager:
         # Auto-discover tools if requested
         if auto_discover:
             self.discover_tools()
+        
+        # Register Claude Code tools if available
+        if CLAUDE_CODE_AVAILABLE and claude_code_registry:
+            try:
+                claude_code_registry.register_claude_code_tools(self.registry)
+                self.logger.info("Claude Code tools registered successfully")
+            except Exception as e:
+                self.logger.warning(f"Failed to register Claude Code tools: {e}")
     
     def discover_tools(self) -> int:
         """
@@ -114,7 +130,8 @@ class ToolManager:
             "codexa.tools.mcp", 
             "codexa.tools.ai_providers",
             "codexa.tools.enhanced",
-            "codexa.tools.system"
+            "codexa.tools.system",
+            "codexa.tools.claude_code"
         ]
         
         for path in discovery_paths:
@@ -242,6 +259,28 @@ class ToolManager:
                     error=f"Tool not found: {tool_name}",
                     tool_name=tool_name
                 )
+            
+            # Extract Claude Code parameters if this is a Claude Code tool
+            if (CLAUDE_CODE_AVAILABLE and claude_code_registry and 
+                hasattr(tool, 'category') and tool.category == "claude_code"):
+                try:
+                    # Extract parameters from user request
+                    user_request = context.user_request or ""
+                    extracted_params = claude_code_registry.extract_parameters_from_request(
+                        tool_name, user_request, context
+                    )
+                    
+                    # Validate and set parameters in context
+                    validation = claude_code_registry.validate_parameters(tool_name, extracted_params)
+                    if validation["valid"]:
+                        for key, value in validation["parameters"].items():
+                            context.update_state(key, value)
+                    else:
+                        self.logger.warning(f"Claude Code parameter validation failed for {tool_name}: {validation.get('error')}")
+                        
+                except Exception as e:
+                    self.logger.debug(f"Claude Code parameter extraction failed for {tool_name}: {e}")
+                    # Continue with execution - not critical
             
             # Check concurrent execution limits
             if tool.max_concurrent_executions > 0:

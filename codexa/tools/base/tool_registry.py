@@ -233,8 +233,18 @@ class ToolRegistry:
                 tool_info.error_count += 1
                 continue
         
-        # Sort by confidence (descending)
-        candidates.sort(key=lambda x: x[1], reverse=True)
+        # Sort by confidence with Claude Code tool prioritization
+        def sort_key(candidate):
+            name, confidence = candidate
+            tool = self.get_tool(name, load=True)
+            
+            # Give Claude Code tools a bonus if they have reasonable confidence
+            if tool and hasattr(tool, 'category') and tool.category == "claude_code" and confidence >= 0.5:
+                # Boost Claude Code tools by 0.25 to prioritize them over generic tools
+                return confidence + 0.25
+            return confidence
+        
+        candidates.sort(key=sort_key, reverse=True)
         
         # Return top candidates
         return candidates[:max_tools]
