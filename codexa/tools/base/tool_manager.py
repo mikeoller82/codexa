@@ -309,13 +309,27 @@ class ToolManager:
                         tool_name, user_request, context
                     )
                     
-                    # Validate and set parameters in context
+                    # Validate and set parameters in context with enhanced error handling
                     validation = claude_code_registry.validate_parameters(tool_name, extracted_params)
                     if validation["valid"]:
                         for key, value in validation["parameters"].items():
                             context.update_state(key, value)
+                        
+                        # Log successful validation with security status
+                        security_status = "with security validation" if validation.get("security_validated") else "legacy validation"
+                        self.logger.debug(f"Parameters validated for {tool_name} {security_status}")
                     else:
-                        self.logger.warning(f"Claude Code parameter validation failed for {tool_name}: {validation.get('error')}")
+                        # Enhanced error logging and user guidance
+                        error_msg = validation.get('error', 'Unknown validation error')
+                        self.logger.warning(f"Claude Code parameter validation failed for {tool_name}: {error_msg}")
+                        
+                        # If using legacy validation, suggest upgrade
+                        if not validation.get("security_validated", True):
+                            self.logger.info(f"Tool {tool_name} using legacy validation - consider upgrading to unified_validator")
+                        
+                        # Don't fail execution but log the issue
+                        context.update_state("validation_warnings", 
+                                           context.get_state("validation_warnings", []) + [error_msg])
                         
                 except Exception as e:
                     self.logger.debug(f"Claude Code parameter extraction failed for {tool_name}: {e}")

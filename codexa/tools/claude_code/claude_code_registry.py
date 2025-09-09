@@ -343,27 +343,70 @@ class ClaudeCodeRegistry:
         }
     
     def validate_parameters(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate parameters against the tool's schema."""
+        """
+        DEPRECATED: Use unified_validator for enhanced security and validation.
+        
+        This method is maintained for backward compatibility but should not be used
+        for new code. It has known security issues and validation gaps.
+        """
+        import warnings
+        warnings.warn(
+            "ClaudeCodeRegistry.validate_parameters is deprecated. "
+            "Use unified_validator.validate_tool_parameters for enhanced security.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
+        # Use unified validator if available
+        try:
+            from ..base.unified_validation import unified_validator
+            validation_result = unified_validator.validate_tool_parameters(tool_name, parameters)
+            return {
+                "valid": validation_result.valid,
+                "parameters": validation_result.parameters,
+                "error": validation_result.get_user_friendly_error() if not validation_result.valid else None,
+                "warnings": validation_result.warnings,
+                "security_validated": True
+            }
+        except ImportError:
+            # Fallback to legacy validation with warnings
+            pass
+        
         if tool_name not in self.schemas:
-            return {"valid": True, "parameters": parameters}
+            return {"valid": True, "parameters": parameters, "security_validated": False}
         
         schema = self.schemas[tool_name]
         required_fields = schema.get("required", [])
         
-        # Check for missing required fields
+        # Enhanced validation logic
         missing_fields = []
-        for field in required_fields:
-            if field not in parameters or not parameters[field]:
-                missing_fields.append(field)
+        invalid_fields = []
         
-        if missing_fields:
+        for field in required_fields:
+            if field not in parameters:
+                missing_fields.append(field)
+            elif parameters[field] is None:
+                missing_fields.append(f"{field} (cannot be None)")
+            elif isinstance(parameters[field], str) and not parameters[field].strip():
+                missing_fields.append(f"{field} (cannot be empty)")
+            elif isinstance(parameters[field], str) and len(parameters[field]) > 10000:
+                invalid_fields.append(f"{field} (too long: {len(parameters[field])} chars)")
+        
+        if missing_fields or invalid_fields:
+            errors = []
+            if missing_fields:
+                errors.append(f"Missing or empty required fields: {', '.join(missing_fields)}")
+            if invalid_fields:
+                errors.append(f"Invalid field values: {', '.join(invalid_fields)}")
+            
             return {
                 "valid": False,
-                "error": f"Missing required fields: {', '.join(missing_fields)}",
-                "parameters": parameters
+                "error": "; ".join(errors),
+                "parameters": parameters,
+                "security_validated": False
             }
         
-        return {"valid": True, "parameters": parameters}
+        return {"valid": True, "parameters": parameters, "security_validated": False}
 
 
 # Global registry instance
