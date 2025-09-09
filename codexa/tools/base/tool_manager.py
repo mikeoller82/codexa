@@ -157,6 +157,7 @@ class ToolManager:
                             allow_parallel: bool = True,
                             enable_coordination: bool = True,
                             coordination_config: Optional[CoordinationConfig] = None,
+                            verbose: bool = False,
                             **kwargs) -> ToolResult:
         """
         Process user request using appropriate tools.
@@ -176,8 +177,14 @@ class ToolManager:
             Consolidated tool result
         """
         try:
+            # Import console for verbose output
+            from rich.console import Console
+            console = Console()
+            
             # Create execution context if not provided
             if context is None:
+                if verbose:
+                    console.print("[dim]📋 Creating execution context...[/dim]")
                 context = self.context_manager.create_context(
                     user_request=request,
                     session_id=session_id,
@@ -189,38 +196,64 @@ class ToolManager:
                 )
             
             # Analyze request
+            if verbose:
+                console.print("[dim]🔍 Analyzing request structure...[/dim]")
             contextual_request = self.request_analyzer.analyze_request(request)
+            
+            if verbose:
+                console.print(f"[dim]   • Request type: {contextual_request.request_type}[/dim]")
+                console.print(f"[dim]   • Complexity: {contextual_request.complexity:.1f}/1.0[/dim]")
+                if contextual_request.entities:
+                    console.print(f"[dim]   • Entities: {', '.join(contextual_request.entities)}[/dim]")
             
             # Check if coordination is enabled and beneficial
             use_coordination = (enable_coordination and 
                               self.coordinator is not None and
                               max_tools > 1)
             
+            if verbose:
+                console.print(f"[dim]🎯 Using {'coordinated' if use_coordination else 'sequential'} execution[/dim]")
+            
             if use_coordination:
                 # Use coordinated execution
+                if verbose:
+                    console.print("[dim]⚙️ Starting tool coordination...[/dim]")
                 return await self._process_request_coordinated(
                     contextual_request,
                     context,
                     max_tools,
-                    coordination_config
+                    coordination_config,
+                    verbose=verbose
                 )
             else:
                 # Use legacy execution plan
+                if verbose:
+                    console.print("[dim]📝 Creating execution plan...[/dim]")
                 plan = await self._create_execution_plan(
                     contextual_request, 
                     context, 
                     max_tools,
-                    allow_parallel
+                    allow_parallel,
+                    verbose=verbose
                 )
                 
                 if not plan.tools:
+                    if verbose:
+                        console.print("[red]❌ No suitable tools found[/red]")
                     return ToolResult.error_result(
                         error="No suitable tools found for request",
                         tool_name="tool_manager"
                     )
                 
+                if verbose:
+                    console.print(f"[dim]📋 Plan: {len(plan.tools)} tools, estimated {plan.estimated_time:.1f}s[/dim]")
+                    for i, tool_name in enumerate(plan.tools, 1):
+                        console.print(f"[dim]   {i}. {tool_name}[/dim]")
+                
                 # Execute plan
-                result = await self._execute_plan(plan, context)
+                if verbose:
+                    console.print("[dim]⚡ Executing plan...[/dim]")
+                result = await self._execute_plan(plan, context, verbose=verbose)
                 
                 # Update context with results
                 context.add_result("final_result", result)
@@ -228,6 +261,10 @@ class ToolManager:
                 
                 # Record execution
                 self._record_execution(plan, result)
+                
+                if verbose:
+                    status = "✅ Success" if result.success else "❌ Failed"
+                    console.print(f"[dim]🏁 Execution complete: {status}[/dim]")
                 
                 return result
             

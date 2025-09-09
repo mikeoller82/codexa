@@ -383,26 +383,71 @@ Analyze the task requirements and take the first logical step to complete it."""
             if not self.tool_manager:
                 return await self._execute_basic(plan, iteration)
             
-            plan_lower = plan.lower()
+            # Show what we're about to do
+            if self.verbose:
+                from rich.console import Console
+                console = Console()
+                console.print(f"[cyan]🛠️ Using tool system to execute: {plan[:80]}{'...' if len(plan) > 80 else ''}[/cyan]")
             
-            # Parse the plan to determine what action to take
-            if "read" in plan_lower and "file" in plan_lower:
-                return await self._execute_file_read(plan)
-            elif "write" in plan_lower or "create" in plan_lower:
-                return await self._execute_file_write(plan)
-            elif "search" in plan_lower:
-                return await self._execute_search(plan)
-            elif "run" in plan_lower or "execute" in plan_lower or "command" in plan_lower:
-                return await self._execute_command(plan)
-            elif "list" in plan_lower or "ls" in plan_lower or "directory" in plan_lower:
-                return await self._execute_directory_list(plan)
+            # Create a context for tool execution
+            from .tools.base.tool_interface import ToolContext
+            
+            context = ToolContext(
+                tool_manager=self.tool_manager,
+                config=self.config,
+                user_request=plan,
+                current_path=".",
+                provider=self.provider
+            )
+            
+            # Use the tool manager to process the plan
+            result = await self.tool_manager.process_request(
+                plan, 
+                context, 
+                max_tools=3,
+                verbose=self.verbose,
+                enable_coordination=True
+            )
+            
+            if result.success:
+                # Extract meaningful result for the agentic loop
+                if result.data:
+                    if isinstance(result.data, dict):
+                        # Extract useful information from structured data
+                        if 'message' in result.data:
+                            return str(result.data['message'])
+                        elif 'coordination_result' in result.data:
+                            return self._extract_coordination_message(result.data['coordination_result'])
+                        elif 'output' in result.data:
+                            return str(result.data['output'])
+                    return str(result.data)
+                elif result.output:
+                    return str(result.output)
+                else:
+                    return f"Tool execution completed successfully for iteration {iteration}"
             else:
-                # Use tool manager to find appropriate tool
-                return await self._execute_with_tool_manager(plan, iteration)
+                error_msg = result.error or "Tool execution failed"
+                self.logger.warning(f"Tool execution failed in iteration {iteration}: {error_msg}")
+                return f"Tool execution failed: {error_msg}. May need to try a different approach."
                 
         except Exception as e:
             self.logger.error(f"Tool execution failed: {e}")
             return f"Tool execution failed: {e}. Falling back to basic approach."
+    
+    def _extract_coordination_message(self, coordination_result) -> str:
+        """Extract a clean message from coordination results."""
+        if hasattr(coordination_result, 'tool_results'):
+            for tool_name, tool_result in coordination_result.tool_results.items():
+                if hasattr(tool_result, 'success') and tool_result.success:
+                    if hasattr(tool_result, 'data') and isinstance(tool_result.data, dict):
+                        if 'message' in tool_result.data:
+                            return str(tool_result.data['message'])
+                        elif 'response' in tool_result.data:
+                            return str(tool_result.data['response'])
+                    elif hasattr(tool_result, 'output') and tool_result.output:
+                        return str(tool_result.output)
+            return "Tool coordination completed successfully"
+        return "Coordination executed"
 
     async def _execute_file_read(self, plan: str) -> str:
         """Execute file reading using real file operations."""
@@ -982,39 +1027,111 @@ Consider:
         self.console.print(f"[bold blue]{'='*60}[/bold blue]")
 
     def _display_thinking(self, thinking_result: Dict[str, str]):
-        """Display the thinking process."""
-        self.console.print(f"\n[bold yellow]🧠 [Thinking][/bold yellow]")
+        """Display the thinking process with enhanced verbose feedback."""
+        self.console.print(f"\n[bold yellow]🧠 [Thinking Process][/bold yellow]")
+        
+        # Show provider status
+        provider_info = ""
+        if thinking_result.get("provider_used"):
+            provider_info = "[dim](Using AI provider for reasoning)[/dim]\n"
+        else:
+            provider_info = "[dim](Using fallback reasoning)[/dim]\n"
+        
+        thinking_content = thinking_result["thinking"]
+        
+        # Add analysis indicators
+        if len(thinking_content) > 200:
+            analysis_depth = "Deep analysis"
+        elif len(thinking_content) > 100:
+            analysis_depth = "Moderate analysis"
+        else:
+            analysis_depth = "Quick analysis"
+        
+        full_content = f"{provider_info}[dim]Analysis depth: {analysis_depth}[/dim]\n\n{thinking_content}"
+        
         self.console.print(Panel(
-            thinking_result["thinking"],
+            full_content,
             border_style="yellow",
-            padding=(0, 1)
+            padding=(1, 2),
+            title="💭 Reasoning",
+            title_align="left"
+        ))
+        
+        # Show the plan separately for clarity
+        self.console.print(f"\n[bold cyan]📋 [Action Plan][/bold cyan]")
+        plan_content = thinking_result.get("plan", "No specific plan generated")
+        self.console.print(Panel(
+            plan_content,
+            border_style="cyan",
+            padding=(0, 1),
+            title="🎯 Next Action",
+            title_align="left"
         ))
 
     def _display_execution(self, execution_result: Dict[str, Any]):
-        """Display execution results."""
-        self.console.print(f"\n[bold green]⚡ [Action][/bold green]")
+        """Display execution results with enhanced feedback."""
+        self.console.print(f"\n[bold green]⚡ [Execution Result][/bold green]")
+        
         result_text = execution_result.get("result", "No result")
         duration = execution_result.get("duration", 0)
+        method = execution_result.get("method", "unknown")
+        success = execution_result.get("success", False)
+        
+        # Show execution method and status
+        status_icon = "✅" if success else "❌"
+        method_text = f"Method: {method}" if method != "unknown" else ""
+        duration_text = f"Duration: {duration:.2f}s"
+        
+        metadata = f"{status_icon} {method_text} • {duration_text}"
+        
+        # Truncate very long results for display
+        display_result = result_text
+        if len(result_text) > 500:
+            display_result = result_text[:500] + "\n[dim]... (result truncated for display)[/dim]"
+        
+        content = f"{display_result}\n\n[dim]{metadata}[/dim]"
         
         self.console.print(Panel(
-            f"{result_text}\n[dim]Duration: {duration:.2f}s[/dim]",
-            border_style="green",
-            padding=(0, 1)
+            content,
+            border_style="green" if success else "red",
+            padding=(1, 2),
+            title=f"🔧 Execution {'Success' if success else 'Failed'}",
+            title_align="left"
         ))
 
     def _display_evaluation(self, evaluation_result: Dict[str, Any]):
-        """Display evaluation results."""
+        """Display evaluation results with enhanced feedback."""
         success = evaluation_result.get("success", False)
         feedback = evaluation_result.get("feedback", "No feedback")
+        confidence = evaluation_result.get("confidence", 0.0)
+        evaluation_method = evaluation_result.get("evaluation_method", "unknown")
         
         icon = "✅" if success else "❌"
         color = "green" if success else "red"
         
-        self.console.print(f"\n[bold {color}]🔍 [Evaluation] {icon}[/bold {color}]")
+        self.console.print(f"\n[bold {color}]🔍 [Evaluation Result] {icon}[/bold {color}]")
+        
+        # Build metadata
+        metadata_parts = []
+        if confidence > 0:
+            metadata_parts.append(f"Confidence: {confidence:.1%}")
+        metadata_parts.append(f"Method: {evaluation_method}")
+        
+        if evaluation_method == "llm":
+            reasoning = evaluation_result.get("reasoning", "")
+            if reasoning:
+                metadata_parts.append(f"AI Reasoning: {reasoning[:100]}{'...' if len(reasoning) > 100 else ''}")
+        
+        metadata = " • ".join(metadata_parts)
+        
+        content = f"{feedback}\n\n[dim]{metadata}[/dim]" if metadata else feedback
+        
         self.console.print(Panel(
-            feedback,
+            content,
             border_style=color,
-            padding=(0, 1)
+            padding=(1, 2),
+            title=f"🧐 Assessment {'Passed' if success else 'Failed'}",
+            title_align="left"
         ))
 
     def _display_refinement(self, refined_context: str):

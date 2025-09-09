@@ -626,6 +626,15 @@ class BuiltInCommands:
                 commands.append(agentic_cmd)
         except ImportError as e:
             print(f"Warning: Could not import agentic commands: {e}")
+        
+        # Import and register enhanced agents command
+        try:
+            from .agents_command import AGENTS_COMMANDS
+            for agents_cmd_class in AGENTS_COMMANDS:
+                agents_cmd = agents_cmd_class()
+                commands.append(agents_cmd)
+        except ImportError as e:
+            print(f"Warning: Could not import agents commands: {e}")
 
         # Import and register search commands
         try:

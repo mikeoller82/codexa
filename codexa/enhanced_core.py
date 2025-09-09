@@ -171,8 +171,80 @@ class EnhancedCodexaAgent:
                 self.logger.error(f"Main loop error: {e}")
 
     async def _process_request_with_tools(self, request: str):
-        """Process user request using the tool-based architecture."""
-        console.print(f"\n[blue4]Processing request with tools...[/blue4]")
+        """Process user request using the tool-based architecture with agentic capabilities."""
+        
+        # Detect if this should use agentic loop
+        should_use_agentic = self._should_use_agentic_mode(request)
+        
+        if should_use_agentic:
+            await self._process_request_agentic(request)
+        else:
+            await self._process_request_direct(request)
+    
+    def _should_use_agentic_mode(self, request: str) -> bool:
+        """Determine if request should use agentic loop mode."""
+        agentic_keywords = [
+            'autonomously', 'iteratively', 'step by step', 'think through',
+            'figure out', 'work through', 'solve', 'debug', 'investigate',
+            'complex', 'comprehensive', 'thorough', 'systematic'
+        ]
+        
+        request_lower = request.lower()
+        
+        # Check for explicit agentic commands
+        if any(cmd in request_lower for cmd in ['/agentic', '/loop', '/autonomous', '/think']):
+            return True
+            
+        # Check for agentic keywords
+        keyword_count = sum(1 for keyword in agentic_keywords if keyword in request_lower)
+        
+        # Use agentic mode for complex requests or multiple agentic indicators
+        return keyword_count >= 2 or len(request) > 100 or '?' in request
+    
+    async def _process_request_agentic(self, request: str):
+        """Process request using agentic loop with verbose feedback."""
+        console.print(f"\n[bold cyan]🤖 Activating Agentic Mode[/bold cyan]")
+        console.print(f"[dim]Request appears to require autonomous thinking and iteration...[/dim]\n")
+        
+        try:
+            # Import agentic loop
+            from .agentic_loop import create_agentic_loop
+            
+            # Create agentic loop with verbose mode enabled
+            loop = create_agentic_loop(
+                config=self.config,
+                max_iterations=20,
+                verbose=True  # Always verbose for the enhanced experience
+            )
+            
+            # Enhance the loop with tool manager integration
+            loop.tool_manager = self.tool_manager
+            loop.mcp_service = self.mcp_service
+            
+            # Run the agentic loop
+            result = await loop.run_agentic_loop(request)
+            
+            # Store results in history
+            self.history.append({
+                "user": request,
+                "assistant": result.final_result or "Task completed via agentic loop",
+                "timestamp": datetime.now().isoformat(),
+                "mode": "agentic",
+                "iterations": len(result.iterations),
+                "success": result.success
+            })
+            
+        except ImportError:
+            console.print("[red]❌ Agentic loop not available, falling back to direct processing...[/red]\n")
+            await self._process_request_direct(request)
+        except Exception as e:
+            console.print(f"[red]❌ Agentic processing failed: {e}[/red]")
+            console.print(f"[yellow]Falling back to direct processing...[/yellow]\n")
+            await self._process_request_direct(request)
+    
+    async def _process_request_direct(self, request: str):
+        """Process request using direct tool coordination with verbose feedback."""
+        console.print(f"\n[blue4]🔧 Processing with tool coordination...[/blue4]")
         
         try:
             # Create tool context
@@ -186,6 +258,9 @@ class EnhancedCodexaAgent:
                 provider=self.provider
             )
             
+            # Show real-time tool discovery and planning
+            console.print("[dim]🔍 Analyzing request and selecting tools...[/dim]")
+            
             # Start performance tracking
             execution_id = None
             if self.tool_manager.performance_monitor:
@@ -195,8 +270,14 @@ class EnhancedCodexaAgent:
                     context_size=len(str(context))
                 )
             
-            # Use tool manager to process the request
-            result = await self.tool_manager.process_request(request, context)
+            # Use tool manager to process the request with verbose feedback
+            result = await self.tool_manager.process_request(
+                request, 
+                context,
+                enable_coordination=True,
+                max_tools=5,
+                verbose=True  # Enable verbose feedback for real-time progress
+            )
             
             # Complete performance tracking
             if execution_id and self.tool_manager.performance_monitor:
