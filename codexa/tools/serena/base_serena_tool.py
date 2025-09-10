@@ -49,7 +49,7 @@ class BaseSerenaTool(Tool):
     @property 
     def required_context(self) -> Set[str]:
         """Required context for Serena operations."""
-        return {"mcp_service", "current_path"}
+        return {"mcp_service"}
     
     async def initialize(self, context: ToolContext) -> bool:
         """Initialize Serena tool with MCP client."""
@@ -67,8 +67,9 @@ class BaseSerenaTool(Tool):
                     return False
                 
                 # Auto-activate project if current path available
-                if context.current_path and not self._serena_client.is_project_active():
-                    await self._activate_current_project(context.current_path)
+                current_path = self._get_current_path(context)
+                if current_path and not self._serena_client.is_project_active():
+                    await self._activate_current_project(current_path)
                 
                 return True
             else:
@@ -168,6 +169,29 @@ class BaseSerenaTool(Tool):
         if self._serena_client:
             return self._serena_client.get_capabilities()
         return {}
+    
+    def _get_current_path(self, context: ToolContext) -> Optional[str]:
+        """Get current path from context safely."""
+        # Try multiple possible attributes
+        for attr in ['current_path', 'current_dir', 'project_path']:
+            path = getattr(context, attr, None)
+            if path:
+                return str(path)
+        
+        # Try from shared state
+        path = context.get_state('current_path') or context.get_state('current_dir')
+        if path:
+            return str(path)
+        
+        # Try from project_info
+        if context.project_info:
+            path = context.project_info.get('path') or context.project_info.get('root_path')
+            if path:
+                return str(path)
+        
+        # Default fallback
+        import os
+        return os.getcwd()
     
     def _create_error_result(self, error: str, **kwargs) -> ToolResult:
         """Create standardized error result for Serena tools."""

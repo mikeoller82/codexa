@@ -59,7 +59,7 @@ class ProjectManagementTool(BaseSerenaTool):
     async def _activate_project(self, context: ToolContext) -> ToolResult:
         """Activate a project in Serena."""
         try:
-            project_path = self._extract_project_path(context) or context.current_path or os.getcwd()
+            project_path = self._extract_project_path(context) or self._get_current_path(context)
             
             # Convert to absolute path
             project_path = os.path.abspath(project_path)

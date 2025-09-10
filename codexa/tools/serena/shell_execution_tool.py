@@ -211,11 +211,8 @@ class ShellExecutionTool(BaseSerenaTool):
                 if not potential_dir.startswith('-') and ('/' in potential_dir or potential_dir.startswith('.')):
                     return potential_dir
         
-        # Use current path from context
-        if context.current_path:
-            return context.current_path
-        
-        return None
+        # Use current path from context safely
+        return self._get_current_path(context)
     
     def _extract_timeout(self, context: ToolContext) -> Optional[float]:
         """Extract timeout from request."""
