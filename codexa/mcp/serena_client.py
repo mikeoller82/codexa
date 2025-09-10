@@ -355,8 +355,8 @@ class SerenaClient:
     async def _discover_tools(self):
         """Discover available tools from Serena server."""
         try:
-            # Get tools list
-            result = await self.connection.send_request("tools/list")
+            # Get tools list - MCP protocol requires explicit empty params
+            result = await self.connection.send_request("tools/list", {})
             
             if isinstance(result, dict) and "tools" in result:
                 tools = result["tools"]

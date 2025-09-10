@@ -80,13 +80,37 @@ class MCPConnection:
         try:
             # Start server process
             full_command = self.config.command + (self.config.args or [])
+            
+            # Prepare environment - inherit current env and add custom vars
+            import os
+            env = os.environ.copy()
+            if self.config.env:
+                env.update(self.config.env)
+            
+            # Ensure common bin directories are in PATH
+            current_path = env.get('PATH', '')
+            home_dir = os.path.expanduser('~')
+            additional_paths = [
+                os.path.join(home_dir, '.local', 'bin'),
+                os.path.join(home_dir, '.cargo', 'bin'),
+                '/usr/local/bin'
+            ]
+            
+            for path in additional_paths:
+                if os.path.exists(path) and path not in current_path:
+                    if current_path:
+                        env['PATH'] = f"{path}:{current_path}"
+                    else:
+                        env['PATH'] = path
+                    current_path = env['PATH']
+            
             self.process = subprocess.Popen(
                 full_command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                env=self.config.env
+                env=env
             )
             
             # Start message reading loop

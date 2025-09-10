@@ -109,7 +109,7 @@ class BaseSerenaTool(Tool):
         
         # Check if Serena client is available and connected
         if not self._serena_client or not self._serena_client.is_connected():
-            self.logger.error("Serena client not available or not connected")
+            self.logger.warning("Serena client not available or not connected - tool will be skipped")
             return False
         
         return True

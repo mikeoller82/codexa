@@ -438,6 +438,9 @@ class Tool(ABC):
             # Check both shared_state and direct attributes
             value = context.get_state(key)
             if value is None:
+                # Also check direct context attributes
+                value = getattr(context, key, None)
+            if value is None:
                 self.logger.error(f"Required context key missing: {key}")
                 return False
         return True

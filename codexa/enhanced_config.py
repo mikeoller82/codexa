@@ -312,7 +312,7 @@ class EnhancedConfig:
                 name="serena",
                 command=["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
                 args=["--context", "ide-assistant"],
-                enabled=False,  # Disabled by default, enable via user config
+                enabled=True,  # Enabled by default for Serena integration
                 capabilities=[
                     "semantic-analysis", "code-editing", "symbol-search", "language-server",
                     "project-management", "shell-execution", "memory", "onboarding",
