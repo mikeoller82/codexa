@@ -59,17 +59,32 @@ class BaseSerenaTool(Tool):
                 self._serena_client = context.mcp_service.get_serena_client()
                 
                 if not self._serena_client:
-                    self.logger.warning("Serena client not available in MCP service")
-                    return False
+                    self.logger.warning("Serena client not available in MCP service - will attempt to start")
+                    # Try to start Serena servers
+                    if hasattr(context.mcp_service, 'start_servers'):
+                        await context.mcp_service.start_servers()
+                        self._serena_client = context.mcp_service.get_serena_client()
+                    
+                    if not self._serena_client:
+                        self.logger.info("Serena client still not available - tool will be disabled")
+                        return False
                 
                 if not self._serena_client.is_connected():
-                    self.logger.warning("Serena client not connected")
-                    return False
+                    self.logger.warning("Serena client not connected - attempting connection")
+                    try:
+                        await self._serena_client.connect()
+                    except Exception as e:
+                        self.logger.warning(f"Failed to connect Serena client: {e}")
+                        return False
                 
                 # Auto-activate project if current path available
                 current_path = self._get_current_path(context)
                 if current_path and not self._serena_client.is_project_active():
-                    await self._activate_current_project(current_path)
+                    try:
+                        await self._activate_current_project(current_path)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to activate project: {e}")
+                        # Don't fail initialization for project activation failure
                 
                 return True
             else:
@@ -107,11 +122,13 @@ class BaseSerenaTool(Tool):
         if not await super().validate_context(context):
             return False
         
-        # Check if Serena client is available and connected
-        if not self._serena_client or not self._serena_client.is_connected():
-            self.logger.warning("Serena client not available or not connected - tool will be skipped")
+        # Basic check - we need access to MCP service to get Serena client
+        if not context.mcp_service:
+            self.logger.debug("No MCP service available for Serena tools")
             return False
         
+        # Don't check connection here - that happens during initialization
+        # This allows the tool to proceed to initialization where connection will be established
         return True
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:

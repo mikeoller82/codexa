@@ -57,25 +57,26 @@ class WriteFileTool(Tool):
     
     async def validate_context(self, context: ToolContext) -> bool:
         """Validate context for write_file tool with flexible parameter extraction."""
-        # Basic validation - we need at least a user request to extract from
-        if not hasattr(context, 'user_request') or not context.user_request:
-            self.logger.error("No user request available for parameter extraction")
-            return False
-        
-        # Check if parameters are already available
+        # Check if parameters are already available in context
         file_path = context.get_state("file_path")
         content = context.get_state("content")
         
-        # If parameters are missing, try to extract them from the request
-        if not file_path or content is None:
-            extracted = self._extract_file_and_content(context.user_request)
-            if not extracted.get("file_path"):
-                self.logger.error(f"Cannot extract file path from request: '{context.user_request}'")
-                return False
-            # For content, we allow empty strings (empty file creation is valid)
-            # The extraction method returns empty string, not None, when nothing found
-            # So we accept any string value, including empty string
+        # If we have explicit parameters, validation passes
+        if file_path:
+            return True
         
+        # Try to extract from user request if available
+        if hasattr(context, 'user_request') and context.user_request:
+            extracted = self._extract_file_and_content(context.user_request)
+            if extracted.get("file_path"):
+                # Store extracted parameters for later use
+                context.update_state("file_path", extracted["file_path"])
+                context.update_state("content", extracted.get("content", ""))
+                return True
+            self.logger.debug(f"Cannot extract file path from request: '{context.user_request}'")
+        
+        # Allow the tool to proceed - execution will handle parameter extraction
+        # This allows MCP tools to work with implicit parameters
         return True
     
     async def execute(self, context: ToolContext) -> ToolResult:
