@@ -25,11 +25,17 @@ try:
     from .planning import PlanningManager
     from .execution import TaskExecutionManager
     from .providers import ProviderFactory  # Always import this as fallback
+    from .session_memory import SessionMemory, AgenticContext
     ENHANCED_MODE = True
 except ImportError:
     from .providers import ProviderFactory
     from .planning import PlanningManager  
     from .execution import TaskExecutionManager
+    try:
+        from .session_memory import SessionMemory, AgenticContext
+    except ImportError:
+        SessionMemory = None
+        AgenticContext = None
     ENHANCED_MODE = False
 
 
@@ -86,13 +92,17 @@ class CodexaAgenticLoop:
         config=None,
         console: Console = None,
         max_iterations: int = 20,
-        verbose: bool = True
+        verbose: bool = True,
+        session_memory: Optional[SessionMemory] = None
     ):
         """Initialize the agentic loop system."""
         self.console = console or Console()
         self.max_iterations = max_iterations
         self.verbose = verbose
         self.logger = logging.getLogger("codexa.agentic_loop")
+        
+        # Session memory integration
+        self.session_memory = session_memory
         
         # Initialize providers and tools
         self.config = config
@@ -144,6 +154,17 @@ class CodexaAgenticLoop:
         self.iterations = []
         self.start_time = time.time()
         
+        # Initialize or update session memory context
+        if self.session_memory and SessionMemory:
+            if not self.session_memory.agentic_context:
+                self.session_memory.start_agentic_context(task)
+                self.logger.info("Started new agentic context in session memory")
+            else:
+                # Update existing context with new iteration
+                self.session_memory.agentic_context.current_objective = task
+                self.session_memory.agentic_context.update_activity()
+                self.logger.info("Continuing existing agentic context")
+        
         if self.verbose:
             self._display_task_header(task)
         
@@ -188,9 +209,39 @@ class CodexaAgenticLoop:
             )
             self.iterations.append(iteration)
             
+            # Update session memory with iteration results
+            if self.session_memory and SessionMemory:
+                tools_used = execution_result.get("tools_used", [])
+                files_created = execution_result.get("files_created", [])
+                files_modified = execution_result.get("files_modified", [])
+                
+                # Determine completed vs pending steps based on evaluation
+                if evaluation_result["success"]:
+                    completed_steps = [thinking_result["plan"]]
+                    pending_steps = []
+                else:
+                    completed_steps = []
+                    pending_steps = [thinking_result["plan"]]
+                
+                self.session_memory.update_agentic_context(
+                    iteration_count=i + 1,
+                    last_result=execution_result["result"],
+                    last_evaluation=evaluation_result["feedback"],
+                    completed_steps=completed_steps,
+                    pending_steps=pending_steps,
+                    files_created=files_created,
+                    files_modified=files_modified,
+                    tools_used=tools_used
+                )
+            
             # Step 4: Check for completion
             if evaluation_result["success"]:
                 status = LoopStatus.SUCCESS
+                
+                # Mark task as completed in session memory
+                if self.session_memory and SessionMemory:
+                    self.session_memory.complete_agentic_context(execution_result["result"])
+                
                 if self.verbose:
                     self._display_success(i + 1)
                 break
@@ -1200,13 +1251,83 @@ Consider:
         """
         result = await self.run_agentic_loop(task)
         return result.final_result or "Task completed but no specific result available"
+    
+    def export_session_context(self) -> Optional[Dict[str, Any]]:
+        """
+        Export current agentic context for session continuity.
+        
+        Returns:
+            Dictionary containing session context data for handoff to main session
+        """
+        if not self.session_memory or not self.session_memory.agentic_context:
+            return None
+        
+        context = self.session_memory.agentic_context
+        
+        return {
+            "original_task": context.original_task,
+            "current_objective": context.current_objective,
+            "is_task_complete": context.is_task_complete(),
+            "pending_steps": context.pending_steps,
+            "completed_steps": context.completed_steps,
+            "iteration_count": context.iteration_count,
+            "last_result": context.last_result,
+            "last_evaluation": context.last_evaluation,
+            "context_keywords": list(context.context_keywords),
+            "files_created": context.files_created,
+            "files_modified": context.files_modified,
+            "tools_used": context.tools_used,
+            "session_state": self.session_memory.current_state.value,
+            "should_continue": len(context.pending_steps) > 0 or not context.is_task_complete()
+        }
+    
+    def import_session_context(self, context_data: Dict[str, Any]) -> bool:
+        """
+        Import session context from main session.
+        
+        Args:
+            context_data: Context data from main session
+            
+        Returns:
+            True if context was successfully imported
+        """
+        if not self.session_memory or not SessionMemory or not context_data:
+            return False
+        
+        try:
+            # Start or update agentic context with imported data
+            if not self.session_memory.agentic_context:
+                self.session_memory.start_agentic_context(
+                    context_data["original_task"],
+                    context_data["current_objective"]
+                )
+            
+            # Update with imported data
+            self.session_memory.update_agentic_context(
+                iteration_count=context_data.get("iteration_count", 0),
+                last_result=context_data.get("last_result"),
+                last_evaluation=context_data.get("last_evaluation"),
+                completed_steps=context_data.get("completed_steps", []),
+                pending_steps=context_data.get("pending_steps", []),
+                files_created=context_data.get("files_created", []),
+                files_modified=context_data.get("files_modified", []),
+                tools_used=context_data.get("tools_used", [])
+            )
+            
+            self.logger.info("Successfully imported session context")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to import session context: {e}")
+            return False
 
 
 # Factory function for easy instantiation
 def create_agentic_loop(
     config=None,
     max_iterations: int = 20,
-    verbose: bool = True
+    verbose: bool = True,
+    session_memory: Optional[SessionMemory] = None
 ) -> CodexaAgenticLoop:
     """
     Factory function to create a configured agentic loop instance.
@@ -1215,6 +1336,7 @@ def create_agentic_loop(
         config: Codexa configuration object
         max_iterations: Maximum number of loop iterations
         verbose: Whether to show verbose output
+        session_memory: Session memory for context persistence
         
     Returns:
         Configured CodexaAgenticLoop instance
@@ -1222,5 +1344,6 @@ def create_agentic_loop(
     return CodexaAgenticLoop(
         config=config,
         max_iterations=max_iterations,
-        verbose=verbose
+        verbose=verbose,
+        session_memory=session_memory
     )

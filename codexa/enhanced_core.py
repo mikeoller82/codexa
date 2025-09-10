@@ -29,6 +29,14 @@ from .enhanced_config import EnhancedConfig
 from .enhanced_providers import EnhancedProviderFactory
 from .mcp_service import MCPService
 
+# Session memory integration
+try:
+    from .session_memory import SessionMemory
+    SESSION_MEMORY_AVAILABLE = True
+except ImportError:
+    SessionMemory = None
+    SESSION_MEMORY_AVAILABLE = False
+
 console = Console()
 
 
@@ -76,6 +84,15 @@ class EnhancedCodexaAgent:
         # Command system
         self.command_registry = CommandRegistry()
         BuiltInCommands.register_all(self.command_registry)
+        
+        # Session memory integration
+        self.session_memory = None
+        if SESSION_MEMORY_AVAILABLE:
+            try:
+                self.session_memory = SessionMemory(self.codexa_dir / "sessions")
+                self.logger.info("Session memory initialized")
+            except Exception as e:
+                self.logger.warning(f"Session memory initialization failed: {e}")
         
         # Initialize tools
         self._initialize_tools()
@@ -150,6 +167,11 @@ class EnhancedCodexaAgent:
         """Main interaction loop using tool-based request processing."""
         console.print("")  # Just a blank line, no repeated ready message
         
+        # Check for resumable agentic context on startup
+        if self.session_memory and self.session_memory.current_state.value in ["agentic_active", "agentic_paused"]:
+            console.print("\n[yellow]🔄 Resuming agentic task context...[/yellow]")
+            console.print(f"[dim]{self.session_memory.get_agentic_summary()}[/dim]\n")
+        
         while True:
             try:
                 user_input = Prompt.ask("\n[bold cyan]codexa>[/bold cyan]").strip()
@@ -161,7 +183,7 @@ class EnhancedCodexaAgent:
                 if not user_input:
                     continue
                 
-                # Process request using tool manager
+                # Process request using tool manager with session memory awareness
                 await self._process_request_with_tools(user_input)
                 
             except KeyboardInterrupt:
@@ -173,11 +195,23 @@ class EnhancedCodexaAgent:
     async def _process_request_with_tools(self, request: str):
         """Process user request using the tool-based architecture with agentic capabilities."""
         
-        # Detect if this should use agentic loop
-        should_use_agentic = self._should_use_agentic_mode(request)
+        # Check if this request is related to an existing agentic task
+        is_agentic_continuation = False
+        if self.session_memory:
+            is_agentic_continuation = self.session_memory.is_request_related_to_agentic_task(request)
+            
+            # Add conversation entry
+            self.session_memory.add_conversation_entry(request, "", "processing")
+        
+        # Determine processing mode
+        should_use_agentic = (
+            is_agentic_continuation or 
+            self._should_use_agentic_mode(request) or
+            (self.session_memory and self.session_memory.should_continue_agentic_mode(request))
+        )
         
         if should_use_agentic:
-            await self._process_request_agentic(request)
+            await self._process_request_agentic(request, is_continuation=is_agentic_continuation)
         else:
             await self._process_request_direct(request)
     
@@ -211,20 +245,25 @@ class EnhancedCodexaAgent:
         # Use agentic mode for complex requests or multiple agentic indicators
         return keyword_count >= 2 or len(request) > 100
     
-    async def _process_request_agentic(self, request: str):
+    async def _process_request_agentic(self, request: str, is_continuation: bool = False):
         """Process request using agentic loop with verbose feedback."""
-        console.print(f"\n[bold cyan]🤖 Activating Agentic Mode[/bold cyan]")
-        console.print(f"[dim]Request appears to require autonomous thinking and iteration...[/dim]\n")
+        if is_continuation:
+            console.print(f"\n[bold cyan]🔄 Continuing Agentic Task[/bold cyan]")
+            console.print(f"[dim]Continuing with related request: {request[:80]}{'...' if len(request) > 80 else ''}[/dim]\n")
+        else:
+            console.print(f"\n[bold cyan]🤖 Activating Agentic Mode[/bold cyan]")
+            console.print(f"[dim]Request appears to require autonomous thinking and iteration...[/dim]\n")
         
         try:
             # Import agentic loop
             from .agentic_loop import create_agentic_loop
             
-            # Create agentic loop with verbose mode enabled
+            # Create agentic loop with verbose mode enabled and session memory integration
             loop = create_agentic_loop(
                 config=self.config,
                 max_iterations=20,
-                verbose=True  # Always verbose for the enhanced experience
+                verbose=True,  # Always verbose for the enhanced experience
+                session_memory=self.session_memory
             )
             
             # Enhance the loop with tool manager integration
@@ -234,15 +273,42 @@ class EnhancedCodexaAgent:
             # Run the agentic loop
             result = await loop.run_agentic_loop(request)
             
-            # Store results in history
+            # Export session context for continuity
+            exported_context = loop.export_session_context()
+            
+            # Determine if the agentic task should continue based on context
+            should_pause_not_end = False
+            if exported_context and not exported_context.get("is_task_complete", True):
+                should_pause_not_end = True
+                
+                # Show continuation status
+                if exported_context.get("should_continue", False):
+                    pending_count = len(exported_context.get("pending_steps", []))
+                    console.print(f"\n[yellow]📋 Agentic task paused with {pending_count} pending steps.[/yellow]")
+                    console.print("[dim]Continue the conversation for automatic resumption.[/dim]")
+                    
+                    # Pause instead of ending the agentic context
+                    if self.session_memory:
+                        self.session_memory.pause_agentic_context()
+            
+            # Store results in history with enhanced context
+            assistant_response = result.final_result or "Task processed via agentic loop"
+            
             self.history.append({
                 "user": request,
-                "assistant": result.final_result or "Task completed via agentic loop",
+                "assistant": assistant_response,
                 "timestamp": datetime.now().isoformat(),
                 "mode": "agentic",
                 "iterations": len(result.iterations),
-                "success": result.success
+                "success": result.success,
+                "context_exported": exported_context is not None,
+                "task_complete": exported_context.get("is_task_complete", True) if exported_context else True,
+                "should_continue": exported_context.get("should_continue", False) if exported_context else False
             })
+            
+            # Update session memory with conversation entry
+            if self.session_memory:
+                self.session_memory.add_conversation_entry(request, assistant_response, "agentic")
             
         except ImportError:
             console.print("[red]❌ Agentic loop not available, falling back to direct processing...[/red]\n")
@@ -316,12 +382,17 @@ class EnhancedCodexaAgent:
                         console.print(message)
                 
                 # Save successful interactions to history
+                assistant_response = self._format_result_message(result) or str(result.data)
                 self.history.append({
                     "user": request,
-                    "assistant": self._format_result_message(result) or str(result.data),
+                    "assistant": assistant_response,
                     "timestamp": datetime.now().isoformat(),
                     "tools_used": getattr(result, 'tools_used', [])
                 })
+                
+                # Update session memory with conversation entry
+                if self.session_memory:
+                    self.session_memory.add_conversation_entry(request, assistant_response, "direct")
                 
             else:
                 error_message = self._format_result_message(result)
@@ -585,6 +656,23 @@ Tool-based Codexa adapts its capabilities based on available tools and project s
             # Stop MCP service
             if self.mcp_service:
                 await self.mcp_service.stop()
+            
+            # Save and cleanup session memory
+            if self.session_memory:
+                try:
+                    # If there's an active agentic context, end it gracefully
+                    if self.session_memory.agentic_context:
+                        self.session_memory.end_agentic_context()
+                    
+                    # Final save of session state
+                    self.session_memory.save_session()
+                    
+                    # Cleanup old sessions
+                    self.session_memory.cleanup_old_sessions(max_age_days=7)
+                    
+                    self.logger.info("Session memory cleanup complete")
+                except Exception as e:
+                    self.logger.error(f"Session memory cleanup failed: {e}")
             
             # Save configuration
             try:
