@@ -658,22 +658,39 @@ class ToolManager:
     
     def _can_tool_execute(self, tool: Tool, context: ToolContext, check_parameters: bool = True) -> bool:
         """Check if a tool can execute with the given context.
-        
+
         Args:
             tool: Tool to check
             context: Tool context
             check_parameters: If True, strictly validate all parameters are present.
-                            If False, only check if tool is generally available.
+                             If False, only check if tool is generally available.
         """
         try:
             # For fallback tools, be more lenient
             if hasattr(tool, 'name') and tool.name in ['universal_fallback', 'conversational_tool']:
                 return True
-            
+
             # For AI provider tool, be lenient if no other tools are available
             if hasattr(tool, 'name') and tool.name == 'ai_provider':
                 return True
-            
+
+            # Special validation for shell execution tools
+            if hasattr(tool, 'name') and tool.name == 'serena_shell_execution':
+                # For shell execution tools, we need to validate that there's actually a command to run
+                if hasattr(tool, '_extract_command'):
+                    try:
+                        extracted_command = tool._extract_command(context)
+                        if not extracted_command:
+                            self.logger.debug(f"Shell execution tool cannot extract command from request: {context.user_request}")
+                            return False
+                        # Additional validation: check if the command looks valid
+                        if hasattr(tool, '_looks_like_command') and not tool._looks_like_command(extracted_command):
+                            self.logger.debug(f"Extracted command doesn't look like a valid command: {extracted_command}")
+                            return False
+                    except Exception as e:
+                        self.logger.debug(f"Error validating shell command extraction: {e}")
+                        return False
+
             # Check if tool has required context - only if checking parameters
             if check_parameters and hasattr(tool, 'required_context') and tool.required_context:
                 for required_key in tool.required_context:
@@ -684,7 +701,7 @@ class ToolManager:
                             # For tools that require specific context, be more strict
                             if required_key in ['file_path', 'pattern', 'directory_path']:
                                 return False
-                    
+
                     # Enhanced validation: Check actual parameter values in shared_state
                     param_value = context.get_state(required_key)
                     if param_value is None:
@@ -698,13 +715,13 @@ class ToolManager:
                             return False
                         elif required_key == 'content' and hasattr(tool, 'name') and tool.name not in ['Write', 'write_file']:
                             return False
-            
+
             # Check if tool has validate_context method
             if hasattr(tool, 'validate_context'):
                 # We can't call the async method here, so we'll be conservative
                 # and assume it might work if basic context is available
                 pass
-            
+
             return True
         except Exception as e:
             self.logger.debug(f"Error checking tool execution capability: {e}")

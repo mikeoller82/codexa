@@ -118,77 +118,114 @@ class ShellExecutionTool(BaseSerenaTool):
             return self._create_error_result(f"Shell execution failed: {e}")
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
-        """Enhanced request matching for shell operations."""
+        """Enhanced request matching for shell operations - only match when actual commands are present."""
         confidence = super().can_handle_request(request, context)
+
+        # First check if we can actually extract a command - if not, return 0
+        extracted_command = self._extract_command(context)
+        if not extracted_command:
+            return 0.0
+
         request_lower = request.lower()
-        
-        # High confidence for explicit shell commands
+
+        # High confidence for explicit shell commands with actual commands
         shell_keywords = [
-            "run", "execute", "command", "shell", "bash", "terminal",
-            "npm", "pip", "python", "node", "git", "make", "build",
-            "test", "install", "update", "deploy", "start", "stop"
+            "run", "execute", "command", "shell", "bash", "terminal"
         ]
-        
+
         for keyword in shell_keywords:
             if keyword in request_lower:
-                confidence = max(confidence, 0.8)
-        
-        # Very high confidence for command-like patterns
-        if any(pattern in request for pattern in ["npm ", "pip ", "git ", "python ", "node ", "make ", "./", "cd "]):
+                # Only boost confidence if we have an actual command after the keyword
+                if self._has_command_after_keyword(request, keyword):
+                    confidence = max(confidence, 0.8)
+
+        # Very high confidence for command-like patterns that indicate actual commands
+        command_prefixes = ["npm ", "pip ", "git ", "python ", "node ", "make ", "./", "cd "]
+        if any(pattern in request for pattern in command_prefixes):
             confidence = max(confidence, 0.9)
-        
-        # Check for command structure patterns
+
+        # Check for command structure patterns that indicate actual executable commands
         command_patterns = [
             r'run\s+[\w\-./]+',
-            r'execute\s+[\w\-./]+', 
+            r'execute\s+[\w\-./]+',
             r'\$\s*[\w\-./]+',
             r'^\s*[\w\-./]+\s+[\w\-]+'
         ]
-        
+
         for pattern in command_patterns:
             if re.search(pattern, request):
                 confidence = max(confidence, 0.7)
-        
+
+        # Additional validation: ensure the extracted command looks like a real command
+        if extracted_command and not self._looks_like_command(extracted_command):
+            return 0.0
+
         return confidence
-    
+
+    def _has_command_after_keyword(self, request: str, keyword: str) -> bool:
+        """Check if there's an actual command after a keyword."""
+        keyword_pos = request.lower().find(keyword.lower())
+        if keyword_pos == -1:
+            return False
+
+        # Get text after the keyword
+        after_keyword = request[keyword_pos + len(keyword):].strip()
+
+        # Check if there's meaningful content after the keyword
+        if not after_keyword:
+            return False
+
+        # Check for command-like patterns after the keyword
+        command_indicators = [
+            after_keyword.startswith((' ', '\t')),
+            any(after_keyword.startswith(cmd) for cmd in ['npm', 'pip', 'git', 'python', 'node', 'make', './', 'cd']),
+            re.search(r'[\w\-./]+\s+[\w\-]+', after_keyword) is not None
+        ]
+
+        return any(command_indicators)
+
     def _extract_command(self, context: ToolContext) -> Optional[str]:
-        """Extract shell command from request."""
+        """Extract shell command from request - be more restrictive to avoid false positives."""
         request = context.user_request or ""
-        
-        # Look for commands after specific keywords
+
+        # Look for commands after specific keywords with validation
         command_patterns = [
-            r'(?:run|execute|command)\s+(.+)',
-            r'\$\s*(.+)',
+            r'(?:run|execute)\s+(.+)',  # Only run/execute, not generic "command"
+            r'\$\s*(.+)',  # Shell variable/command substitution
             r'shell:\s*(.+)',
             r'bash:\s*(.+)'
         ]
-        
+
         for pattern in command_patterns:
             match = re.search(pattern, request, re.IGNORECASE)
             if match:
-                return match.group(1).strip()
-        
-        # Look for quoted commands
+                potential_command = match.group(1).strip()
+                if self._looks_like_command(potential_command):
+                    return potential_command
+
+        # Look for quoted commands with validation
         quoted_commands = re.findall(r'["\']([^"\']+)["\']', request)
         for cmd in quoted_commands:
             if self._looks_like_command(cmd):
                 return cmd
-        
-        # Check if entire request looks like a command
-        if self._looks_like_command(request):
+
+        # Check if entire request looks like a command (very restrictive)
+        if self._looks_like_command(request) and self._is_clear_command_request(request):
             return request.strip()
-        
-        # Look for common command prefixes
+
+        # Look for common command prefixes only if they appear to be actual commands
         command_prefixes = [
             "npm", "pip", "python", "node", "git", "make", "docker",
             "curl", "wget", "ls", "cd", "mkdir", "cp", "mv", "rm",
             "chmod", "chown", "ps", "kill", "which", "echo", "cat"
         ]
-        
+
         words = request.split()
-        if words and words[0].lower() in command_prefixes:
+        if (words and
+            words[0].lower() in command_prefixes and
+            self._is_clear_command_request(request)):
             return request.strip()
-        
+
         return None
     
     def _extract_working_directory(self, context: ToolContext) -> Optional[str]:
@@ -250,7 +287,35 @@ class ShellExecutionTool(BaseSerenaTool):
         ]
         
         return any(command_indicators)
-    
+
+    def _is_clear_command_request(self, request: str) -> bool:
+        """Check if the request clearly indicates a shell command should be executed."""
+        request_lower = request.lower()
+
+        # Must have clear command intent
+        command_indicators = [
+            # Explicit command prefixes
+            request.startswith(('npm ', 'pip ', 'git ', 'python ', 'node ', 'make ', 'docker ')),
+            request.startswith(('./', 'cd ', 'ls ', 'mkdir ', 'cp ', 'mv ', 'rm ')),
+            # Command-like structure
+            bool(re.search(r'^\w+\s+[\w\-./]', request)),  # word + space + word/path
+            # Shell syntax
+            '$' in request and not request.count('$') > 3,  # Has $ but not too many (avoid template strings)
+        ]
+
+        # Must NOT have conversational indicators that suggest this isn't a command
+        conversational_indicators = [
+            "how do i", "what is", "explain", "tell me about", "show me",
+            "can you", "please", "would you", "could you", "help me",
+            "i want to", "i need to", "let me", "why does", "when should"
+        ]
+
+        has_command_intent = any(command_indicators)
+        has_conversational_intent = any(indicator in request_lower for indicator in conversational_indicators)
+
+        # Only return true if we have clear command intent and no conversational intent
+        return has_command_intent and not has_conversational_intent
+
     def _is_command_safe(self, command: str) -> bool:
         """Basic command safety validation."""
         command_lower = command.lower()
