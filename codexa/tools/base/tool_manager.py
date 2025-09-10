@@ -497,7 +497,7 @@ class ToolManager:
             if confidence > 0.05:  # Lowered minimum confidence threshold
                 # Check if tool can actually execute with current context
                 tool = self.registry.get_tool(tool_name)
-                if tool and self._can_tool_execute(tool, context):
+                if tool and self._can_tool_execute(tool, context, check_parameters=False):
                     selected_tools.append(tool_name)
                 else:
                     self.logger.debug(f"Skipping tool {tool_name} due to context validation")
@@ -507,7 +507,7 @@ class ToolManager:
             # Try to find any tool that can execute, even with low confidence
             for tool_name, confidence in candidates:
                 tool = self.registry.get_tool(tool_name)
-                if tool and self._can_tool_execute(tool, context):
+                if tool and self._can_tool_execute(tool, context, check_parameters=False):
                     selected_tools.append(tool_name)
                     break
         
@@ -656,8 +656,15 @@ class ToolManager:
         
         return total_time
     
-    def _can_tool_execute(self, tool: Tool, context: ToolContext) -> bool:
-        """Check if a tool can execute with the given context."""
+    def _can_tool_execute(self, tool: Tool, context: ToolContext, check_parameters: bool = True) -> bool:
+        """Check if a tool can execute with the given context.
+        
+        Args:
+            tool: Tool to check
+            context: Tool context
+            check_parameters: If True, strictly validate all parameters are present.
+                            If False, only check if tool is generally available.
+        """
         try:
             # For fallback tools, be more lenient
             if hasattr(tool, 'name') and tool.name in ['universal_fallback', 'conversational_tool']:
@@ -667,8 +674,8 @@ class ToolManager:
             if hasattr(tool, 'name') and tool.name == 'ai_provider':
                 return True
             
-            # Check if tool has required context
-            if hasattr(tool, 'required_context') and tool.required_context:
+            # Check if tool has required context - only if checking parameters
+            if check_parameters and hasattr(tool, 'required_context') and tool.required_context:
                 for required_key in tool.required_context:
                     # Check if the key exists as an attribute (legacy support)
                     if hasattr(context, required_key):
@@ -686,7 +693,10 @@ class ToolManager:
                             return False
                     elif isinstance(param_value, str) and not param_value.strip():
                         # Empty string parameters are also invalid for critical tools
-                        if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
+                        # Exception: content can be empty for write operations (creating empty files)
+                        if required_key in ['file_path', 'pattern', 'directory_path']:
+                            return False
+                        elif required_key == 'content' and hasattr(tool, 'name') and tool.name not in ['Write', 'write_file']:
                             return False
             
             # Check if tool has validate_context method
@@ -779,7 +789,7 @@ class ToolManager:
                 if confidence > 0.05:  # Lowered minimum confidence threshold
                     # Check if tool can actually execute with current context
                     tool = self.registry.get_tool(tool_name)
-                    if tool and self._can_tool_execute(tool, context):
+                    if tool and self._can_tool_execute(tool, context, check_parameters=False):
                         selected_tools.append(tool_name)
                         if verbose:
                             console.print(f"[dim]   ✓ {tool_name} (confidence: {confidence:.2f})[/dim]")
@@ -793,7 +803,7 @@ class ToolManager:
                 # Try to find any tool that can execute, even with low confidence
                 for tool_name, confidence in candidates:
                     tool = self.registry.get_tool(tool_name)
-                    if tool and self._can_tool_execute(tool, context):
+                    if tool and self._can_tool_execute(tool, context, check_parameters=False):
                         selected_tools.append(tool_name)
                         self.logger.warning(f"Using low-confidence tool {tool_name} with confidence {confidence:.3f}")
                         break

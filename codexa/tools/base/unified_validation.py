@@ -118,7 +118,7 @@ class StringValidator(ParameterValidator):
     
     def validate(self, value: Any, context: Optional[ToolContext] = None) -> ValidationResult:
         """Validate string parameter with security checks."""
-        result = ValidationResult()
+        result = ValidationResult(valid=True)
         
         # Type check
         if not isinstance(value, str):
@@ -196,7 +196,7 @@ class EnumValidator(ParameterValidator):
     
     def validate(self, value: Any, context: Optional[ToolContext] = None) -> ValidationResult:
         """Validate enum parameter."""
-        result = ValidationResult()
+        result = ValidationResult(valid=True)
         
         if not isinstance(value, str):
             result.add_error(f"Expected string, got {type(value).__name__}")
@@ -245,6 +245,17 @@ class UnifiedValidator:
                 ]
             ),
             "description": StringValidator(max_length=200, allow_empty=True)
+        }
+        
+        # Write tool validators
+        self.tool_validators["Write"] = {
+            "file_path": StringValidator(min_length=1, max_length=500),
+            "content": StringValidator(min_length=0, max_length=100000, allow_empty=True)  # Allow empty content
+        }
+        
+        # Read tool validators
+        self.tool_validators["Read"] = {
+            "file_path": StringValidator(min_length=1, max_length=500),
         }
         
         # Add more tool validators as needed...

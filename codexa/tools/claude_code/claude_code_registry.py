@@ -295,43 +295,76 @@ class ClaudeCodeRegistry:
         file_path = None
         content = None
         
-        # Look for patterns like "write 'content' to file.txt" or "create file.txt with content"
-        write_patterns = [
-            r'(?:write|create|save)\s+["\']([^"\']+)["\']\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
-            r'(?:create|write)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+["\']([^"\']+)["\']',
-            r'(?:write|save)\s+(?:to|file)\s*:?\s*([^\s]+\.[a-zA-Z0-9]+)',
+        # Pattern 1: Direct content with explicit destination - "write 'content' to file.txt"
+        content_to_file_patterns = [
+            r'(?:write|save)\s+["\']([^"\']+)["\']\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
+            r'(?:write|save)\s+(.+?)\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
         ]
         
-        for pattern in write_patterns:
+        for pattern in content_to_file_patterns:
             match = re.search(pattern, request, re.IGNORECASE)
             if match:
-                if len(match.groups()) == 2:
-                    # Pattern with both content and file
-                    if 'to' in pattern:
-                        content, file_path = match.groups()
-                    else:
-                        file_path, content = match.groups()
-                else:
-                    # Pattern with just file path
-                    file_path = match.group(1)
+                content, file_path = match.groups()
+                content = content.strip().strip('"\'')  # Clean up quotes
                 break
         
-        # If no specific pattern matched, look for file extension separately
+        # Pattern 2: File with content - "create file.txt with 'content'"
         if not file_path:
+            file_with_content_patterns = [
+                r'(?:create|write|make)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+["\']([^"\']+)["\']',
+                r'(?:create|write|make)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+(.+)',
+            ]
+            
+            for pattern in file_with_content_patterns:
+                match = re.search(pattern, request, re.IGNORECASE)
+                if match:
+                    file_path, content = match.groups()
+                    content = content.strip().strip('"\'')
+                    break
+        
+        # Pattern 3: "save the following to file.py: content"
+        if not file_path:
+            save_following_match = re.search(r'save\s+(?:the\s+)?following\s+to\s+([^\s:]+(?:\.[a-zA-Z0-9]+)?)\s*:\s*(.+)', request, re.IGNORECASE | re.DOTALL)
+            if save_following_match:
+                file_path, content = save_following_match.groups()
+                content = content.strip()
+        
+        # Pattern 4: Just file creation - "create file.txt", "make README.md", "write file.py"
+        if not file_path:
+            file_creation_patterns = [
+                r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:file\s+)?(?:called\s+)?([^\s]+\.[a-zA-Z0-9]+)',
+                r'(?:create|make|write)\s+(?:a\s+)?([A-Z][A-Z0-9]*(?:\.[a-zA-Z0-9]+)?)',  # README, CHANGELOG, etc.
+            ]
+            
+            for pattern in file_creation_patterns:
+                match = re.search(pattern, request, re.IGNORECASE)
+                if match:
+                    file_path = match.group(1)
+                    # For file creation without explicit content, provide empty string
+                    if content is None:
+                        content = ""
+                    break
+        
+        # Pattern 5: Generic file path extraction
+        if not file_path:
+            # Look for any file with extension
             file_match = re.search(r'([^\s]+\.[a-zA-Z0-9]+)', request)
             if file_match:
                 potential_path = file_match.group(1)
-                # Basic validation to ensure it's likely a file path
-                if not re.match(r'^[a-z]+\.[a-z]+$', potential_path):
+                # Avoid matching generic words like "file.txt" or "some.thing"
+                if not re.match(r'^[a-z]+\.[a-z]+$', potential_path) and '/' not in potential_path[:-10]:
                     file_path = potential_path
+                    if content is None:
+                        content = ""
         
-        # Look for quoted content separately if not found yet
-        if not content:
+        # Content extraction if not found yet
+        if file_path and content is None:
             # Look for content in quotes or code blocks
             content_patterns = [
-                r'["\']([^"\']{10,})["\']',  # Long quoted strings
                 r'```([^`]+)```',  # Code blocks
-                r'content[:\s]+["\']([^"\']+)["\']'  # Explicit content: "..."
+                r'["\']([^"\']{2,})["\']',  # Quoted strings (reduced min length)
+                r'content[:\s]+["\']([^"\']+)["\']',  # Explicit content: "..."
+                r':\s*(.+)$',  # Content after colon at end
             ]
             
             for pattern in content_patterns:
@@ -339,10 +372,14 @@ class ClaudeCodeRegistry:
                 if match:
                     content = match.group(1).strip()
                     break
+            
+            # If still no content, default to empty string for file creation
+            if content is None:
+                content = ""
         
         return {
-            "file_path": file_path,  # Return None if not found
-            "content": content       # Return None if not found
+            "file_path": file_path,
+            "content": content
         }
     
     def _extract_edit_parameters(self, request: str, schema: Dict[str, Any], 
