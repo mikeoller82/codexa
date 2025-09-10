@@ -171,6 +171,8 @@ class SerenaClient:
 
             # Try different parameter formats for tools/call
             param_formats = [
+                # Direct parameters format (Serena expects this)
+                parameters,
                 # Standard MCP format
                 {
                     "name": tool_name,
@@ -180,9 +182,7 @@ class SerenaClient:
                 {
                     "tool": tool_name,
                     "parameters": parameters
-                },
-                # Direct parameters (some servers expect this)
-                parameters
+                }
             ]
 
             last_error = None
@@ -449,9 +449,10 @@ class SerenaClient:
                             self.logger.debug(f"Discovered tool: {tool_name}")
 
         except Exception as e:
-            self.logger.error(f"Failed to discover tools: {e}")
+            self.logger.warning(f"Failed to discover tools via MCP protocol: {e}")
             # Continue with known tools even if discovery fails
             self._add_default_tools()
+            self.logger.info(f"Using {len(self.available_tools)} default tools as fallback")
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific tool."""

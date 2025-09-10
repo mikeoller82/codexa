@@ -165,25 +165,38 @@ class MCPService:
             # Update performance metrics for failure
             response_time = (datetime.now() - start_time).total_seconds()
             self.server_registry.update_performance(server_name, response_time, False)
-            
+
             self.logger.error(f"Failed to query {server_name}: {e}")
-            
+
+            # Special handling for Serena - use client fallback
+            if server_name == "serena" and self.serena_manager.get_client("serena"):
+                self.logger.info("Trying Serena client fallback")
+                try:
+                    serena_client = self.serena_manager.get_client("serena")
+                    if serena_client:
+                        # Map the request to appropriate Serena method
+                        result = await serena_client.call_tool(tool_name, context)
+                        self.logger.info("Successfully used Serena client fallback")
+                        return result
+                except Exception as fallback_e:
+                    self.logger.error(f"Serena client fallback also failed: {fallback_e}")
+
             # Try fallback server if available
             if not preferred_server:
                 fallback_matches = self.server_registry.find_matches(
                     request, required_capabilities or [], context
                 )
-                
+
                 # Filter out the failed server
                 fallback_matches = [m for m in fallback_matches if m.server_name != server_name]
-                
+
                 if fallback_matches:
                     fallback_server = fallback_matches[0].server_name
                     self.logger.info(f"Trying fallback server: {fallback_server}")
                     return await self.query_server(
                         request, fallback_server, required_capabilities, context
                     )
-            
+
             raise
     
     async def get_documentation(self, library: str, topic: Optional[str] = None) -> str:
