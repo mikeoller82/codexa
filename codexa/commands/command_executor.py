@@ -81,12 +81,38 @@ class CommandExecutor:
                         if param_name not in mapped_kwargs:  # Don't override explicit kwargs
                             mapped_kwargs[param_name] = arg
             
-            # Validate parameters
+            # Validate parameters with enhanced error handling
             validation_errors = command.validate_parameters(mapped_kwargs)
             if validation_errors:
-                return CommandExecutionResult(
-                    False, error="Parameter validation failed:\n" + "\n".join(validation_errors)
+                # For natural language requests, try to be more forgiving
+                user_input_lower = input_text.lower()
+                is_natural_language = (
+                    len(user_input_lower.split()) > 3 and
+                    not any(user_input_lower.startswith(prefix) for prefix in ['/', '--', '-']) and
+                    not any(keyword in user_input_lower for keyword in ['--help', '-h', '/help'])
                 )
+
+                if is_natural_language:
+                    # For natural language, only fail on truly critical validation errors
+                    critical_errors = []
+                    for error in validation_errors:
+                        if any(critical in error.lower() for critical in [
+                            'required parameter', 'missing', 'invalid type'
+                        ]):
+                            critical_errors.append(error)
+
+                    if not critical_errors:
+                        # Non-critical validation errors, proceed anyway
+                        self.logger.warning(f"Non-critical validation errors for natural language request: {validation_errors}")
+                    elif len(critical_errors) > 0:
+                        return CommandExecutionResult(
+                            False, error="Parameter validation failed:\n" + "\n".join(critical_errors)
+                        )
+                else:
+                    # For structured commands, be strict about validation
+                    return CommandExecutionResult(
+                        False, error="Parameter validation failed:\n" + "\n".join(validation_errors)
+                    )
             
             # Create execution context
             context = CommandContext(

@@ -300,7 +300,7 @@ class ToolManager:
                 )
             
             # Extract Claude Code parameters if this is a Claude Code tool
-            if (CLAUDE_CODE_AVAILABLE and claude_code_registry and 
+            if (CLAUDE_CODE_AVAILABLE and claude_code_registry and
                 hasattr(tool, 'category') and tool.category == "claude_code"):
                 try:
                     # Extract parameters from user request
@@ -308,7 +308,7 @@ class ToolManager:
                     extracted_params = claude_code_registry.extract_parameters_from_request(
                         tool_name, user_request, context
                     )
-                    
+
                     # Validate and set parameters in context with enhanced error handling
                     validation = claude_code_registry.validate_parameters(tool_name, extracted_params)
                     if validation["valid"]:
@@ -316,7 +316,7 @@ class ToolManager:
                             # Only set non-None values to avoid overriding defaults
                             if value is not None:
                                 context.update_state(key, value)
-                        
+
                         # Log successful validation with security status
                         security_status = "with security validation" if validation.get("security_validated") else "legacy validation"
                         self.logger.debug(f"Parameters validated for {tool_name} {security_status}")
@@ -324,17 +324,42 @@ class ToolManager:
                         # Enhanced error logging and user guidance
                         error_msg = validation.get('error', 'Unknown validation error')
                         self.logger.warning(f"Claude Code parameter validation failed for {tool_name}: {error_msg}")
-                        
-                        # If using legacy validation, suggest upgrade
-                        if not validation.get("security_validated", True):
-                            self.logger.info(f"Tool {tool_name} using legacy validation - consider upgrading to unified_validator")
-                        
-                        # Don't fail execution but log the issue
-                        context.update_state("validation_warnings", 
-                                           context.get_state("validation_warnings", []) + [error_msg])
-                        
+
+                        # For natural language requests, be more forgiving
+                        is_natural_language = (
+                            len(user_request.split()) > 3 and
+                            not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
+                        )
+
+                        if is_natural_language:
+                            # For natural language, don't fail on parameter validation
+                            # Instead, try to continue with available parameters
+                            self.logger.info(f"Natural language request - proceeding despite parameter validation failure for {tool_name}")
+                            context.update_state("parameter_warnings",
+                                               context.get_state("parameter_warnings", []) + [error_msg])
+                        else:
+                            # For structured requests, suggest upgrade and continue
+                            if not validation.get("security_validated", True):
+                                self.logger.info(f"Tool {tool_name} using legacy validation - consider upgrading to unified_validator")
+
+                            # Don't fail execution but log the issue
+                            context.update_state("validation_warnings",
+                                               context.get_state("validation_warnings", []) + [error_msg])
+
                 except Exception as e:
                     self.logger.debug(f"Claude Code parameter extraction failed for {tool_name}: {e}")
+
+                    # For natural language requests, don't let parameter extraction failures stop execution
+                    user_request = context.user_request or ""
+                    is_natural_language = (
+                        len(user_request.split()) > 3 and
+                        not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
+                    )
+
+                    if is_natural_language:
+                        self.logger.info(f"Natural language request - proceeding despite parameter extraction failure for {tool_name}")
+                        context.update_state("extraction_warnings",
+                                           context.get_state("extraction_warnings", []) + [str(e)])
                     # Continue with execution - not critical
             
             # Check concurrent execution limits
@@ -491,24 +516,44 @@ class ToolManager:
             max_tools * 2  # Get more candidates for better selection
         )
         
-        # Select best tools with lower threshold for better coverage
+        # Select best tools with adaptive threshold for better coverage
         selected_tools = []
+
+        # Check if this is a natural language request
+        user_request = context.user_request or ""
+        is_natural_language = (
+            len(user_request.split()) > 3 and
+            not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
+        )
+
+        # Use adaptive confidence threshold
+        min_confidence = 0.01 if is_natural_language else 0.05  # Much lower for natural language
+
         for tool_name, confidence in candidates[:max_tools]:
-            if confidence > 0.05:  # Lowered minimum confidence threshold
+            if confidence > min_confidence:
                 # Check if tool can actually execute with current context
+                tool = self.registry.get_tool(tool_name)
+                if tool and self._can_tool_execute(tool, context, check_parameters=not is_natural_language):
+                    selected_tools.append(tool_name)
+                    if is_natural_language:
+                        self.logger.debug(f"Selected tool {tool_name} for natural language request (confidence: {confidence:.3f})")
+                else:
+                    self.logger.debug(f"Skipping tool {tool_name} due to context validation")
+            elif is_natural_language and confidence > 0.001:
+                # For natural language, be even more permissive for very low confidence tools
                 tool = self.registry.get_tool(tool_name)
                 if tool and self._can_tool_execute(tool, context, check_parameters=False):
                     selected_tools.append(tool_name)
-                else:
-                    self.logger.debug(f"Skipping tool {tool_name} due to context validation")
-        
+                    self.logger.debug(f"Selected low-confidence tool {tool_name} for natural language request (confidence: {confidence:.3f})")
+
         # If still no tools found, be more permissive
         if not selected_tools and candidates:
-            # Try to find any tool that can execute, even with low confidence
+            # Try to find any tool that can execute, even with very low confidence
             for tool_name, confidence in candidates:
                 tool = self.registry.get_tool(tool_name)
                 if tool and self._can_tool_execute(tool, context, check_parameters=False):
                     selected_tools.append(tool_name)
+                    self.logger.warning(f"Using very low-confidence tool {tool_name} (confidence: {confidence:.3f}) as fallback")
                     break
         
         # CRITICAL: Ensure we always have at least one tool available
@@ -663,7 +708,7 @@ class ToolManager:
             tool: Tool to check
             context: Tool context
             check_parameters: If True, strictly validate all parameters are present.
-                             If False, only check if tool is generally available.
+                              If False, only check if tool is generally available.
         """
         try:
             # For fallback tools, be more lenient
@@ -691,30 +736,54 @@ class ToolManager:
                         self.logger.debug(f"Error validating shell command extraction: {e}")
                         return False
 
-            # Check if tool has required context - only if checking parameters
+            # For natural language requests, be much more lenient with parameter validation
+            # Only check parameters if explicitly required and we have a clear indication they're needed
             if check_parameters and hasattr(tool, 'required_context') and tool.required_context:
-                for required_key in tool.required_context:
-                    # Check if the key exists as an attribute (legacy support)
-                    if hasattr(context, required_key):
-                        attr_value = getattr(context, required_key)
-                        if attr_value is None:
-                            # For tools that require specific context, be more strict
+                # Check if this looks like a natural language request that might not have explicit parameters
+                user_request = context.user_request or ""
+                is_natural_language = len(user_request.split()) > 3 and not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
+
+                if is_natural_language:
+                    # For natural language, only require parameters that are clearly essential
+                    essential_params = ['file_path', 'pattern', 'directory_path']  # These are truly required
+                    for required_key in tool.required_context:
+                        if required_key in essential_params:
+                            # Check if the key exists as an attribute (legacy support)
+                            if hasattr(context, required_key):
+                                attr_value = getattr(context, required_key)
+                                if attr_value is None:
+                                    return False
+
+                            # Enhanced validation: Check actual parameter values in shared_state
+                            param_value = context.get_state(required_key)
+                            if param_value is None:
+                                return False
+                            elif isinstance(param_value, str) and not param_value.strip():
+                                return False
+                else:
+                    # For structured requests, be more strict but still forgiving
+                    for required_key in tool.required_context:
+                        # Check if the key exists as an attribute (legacy support)
+                        if hasattr(context, required_key):
+                            attr_value = getattr(context, required_key)
+                            if attr_value is None:
+                                # For tools that require specific context, be more strict
+                                if required_key in ['file_path', 'pattern', 'directory_path']:
+                                    return False
+
+                        # Enhanced validation: Check actual parameter values in shared_state
+                        param_value = context.get_state(required_key)
+                        if param_value is None:
+                            # For tools that require specific parameters, be more strict
+                            if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
+                                return False
+                        elif isinstance(param_value, str) and not param_value.strip():
+                            # Empty string parameters are also invalid for critical tools
+                            # Exception: content can be empty for write operations (creating empty files)
                             if required_key in ['file_path', 'pattern', 'directory_path']:
                                 return False
-
-                    # Enhanced validation: Check actual parameter values in shared_state
-                    param_value = context.get_state(required_key)
-                    if param_value is None:
-                        # For tools that require specific parameters, be more strict
-                        if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
-                            return False
-                    elif isinstance(param_value, str) and not param_value.strip():
-                        # Empty string parameters are also invalid for critical tools
-                        # Exception: content can be empty for write operations (creating empty files)
-                        if required_key in ['file_path', 'pattern', 'directory_path']:
-                            return False
-                        elif required_key == 'content' and hasattr(tool, 'name') and tool.name not in ['Write', 'write_file']:
-                            return False
+                            elif required_key == 'content' and hasattr(tool, 'name') and tool.name not in ['Write', 'write_file']:
+                                return False
 
             # Check if tool has validate_context method
             if hasattr(tool, 'validate_context'):

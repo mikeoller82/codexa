@@ -321,7 +321,7 @@ class EnhancedCodexaAgent:
     async def _process_request_direct(self, request: str):
         """Process request using direct tool coordination with verbose feedback."""
         console.print(f"\n[blue4]🔧 Processing with tool coordination...[/blue4]")
-        
+
         try:
             # Create tool context
             context = ToolContext(
@@ -333,10 +333,10 @@ class EnhancedCodexaAgent:
                 user_request=request,
                 provider=self.provider
             )
-            
+
             # Show real-time tool discovery and planning
             console.print("[dim]🔍 Analyzing request and selecting tools...[/dim]")
-            
+
             # Start performance tracking
             execution_id = None
             if self.tool_manager.performance_monitor:
@@ -345,24 +345,24 @@ class EnhancedCodexaAgent:
                     request=request,
                     context_size=len(str(context))
                 )
-            
+
             # Use tool manager to process the request with verbose feedback
             result = await self.tool_manager.process_request(
-                request, 
+                request,
                 context,
                 enable_coordination=True,
                 max_tools=5,
                 verbose=True  # Enable verbose feedback for real-time progress
             )
-            
+
             # Complete performance tracking
             if execution_id and self.tool_manager.performance_monitor:
                 self.tool_manager.performance_monitor.complete_execution(
-                    execution_id, 
+                    execution_id,
                     result,
                     confidence_score=0.8  # Default confidence for successful routing
                 )
-            
+
             if result.success:
                 # Display result - no need for "Codexa:" prefix in most cases
                 if result.data:
@@ -380,7 +380,7 @@ class EnhancedCodexaAgent:
                     message = self._format_result_message(result)
                     if message and message.strip():
                         console.print(message)
-                
+
                 # Save successful interactions to history
                 assistant_response = self._format_result_message(result) or str(result.data)
                 self.history.append({
@@ -389,20 +389,83 @@ class EnhancedCodexaAgent:
                     "timestamp": datetime.now().isoformat(),
                     "tools_used": getattr(result, 'tools_used', [])
                 })
-                
+
                 # Update session memory with conversation entry
                 if self.session_memory:
                     self.session_memory.add_conversation_entry(request, assistant_response, "direct")
-                
+
             else:
+                # Enhanced error handling with fallback to direct AI processing
                 error_message = self._format_result_message(result)
+                console.print(f"[yellow]⚠️ Tool processing failed, trying direct AI response...[/yellow]")
+
+                # Fallback to direct AI processing for natural language requests
+                try:
+                    fallback_response = await self._process_with_ai_fallback(request)
+                    if fallback_response:
+                        console.print(fallback_response)
+                        # Save fallback response to history
+                        self.history.append({
+                            "user": request,
+                            "assistant": fallback_response,
+                            "timestamp": datetime.now().isoformat(),
+                            "fallback": True
+                        })
+                        if self.session_memory:
+                            self.session_memory.add_conversation_entry(request, fallback_response, "fallback")
+                        return  # Success via fallback
+                except Exception as fallback_error:
+                    self.logger.error(f"Fallback processing failed: {fallback_error}")
+
+                # If fallback also fails, show the original error
                 console.print(f"[red]Request failed: {error_message}[/red]")
                 if result.data and isinstance(result.data, dict) and 'error' in result.data:
                     console.print(f"[dim]Details: {result.data['error']}[/dim]")
-        
+
         except Exception as e:
             console.print(f"[red]Request processing failed: {e}[/red]")
             self.logger.error(f"Request processing error: {e}")
+
+    async def _process_with_ai_fallback(self, request: str) -> Optional[str]:
+        """Fallback to direct AI processing when tool system fails."""
+        try:
+            # Get project context
+            context_parts = []
+
+            # Add CODEXA.md content
+            codexa_md = self.cwd / "CODEXA.md"
+            if codexa_md.exists():
+                with open(codexa_md, "r", encoding="utf-8") as f:
+                    context_parts.append(f"Project Guidelines:\n{f.read()}")
+
+            # Add basic project info
+            context_parts.append(f"Current Directory: {self.cwd}")
+
+            # Add file listing (basic)
+            files = []
+            for item in self.cwd.iterdir():
+                if not item.name.startswith('.') and item.is_file():
+                    files.append(item.name)
+
+            if files:
+                context_parts.append(f"Files in project: {', '.join(files[:10])}")
+
+            project_context = "\n\n".join(context_parts)
+
+            # Use AI provider directly
+            response = await self.provider.ask_async(
+                prompt=request,
+                history=self.history,
+                context=project_context
+            )
+
+            if response:
+                return response
+
+        except Exception as e:
+            self.logger.error(f"AI fallback failed: {e}")
+
+        return None
     
     def _display_structured_result(self, data: dict):
         """Display structured result data in a user-friendly format."""

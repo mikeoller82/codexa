@@ -82,12 +82,12 @@ class Command(ABC):
         pass
     
     def validate_parameters(self, args: Dict[str, Any]) -> List[str]:
-        """Validate command parameters."""
+        """Validate command parameters with enhanced error handling."""
         errors = []
-        
+
         for param in self.parameters:
             value = args.get(param.name)
-            
+
             if not param.validate(value):
                 if param.required and value is None:
                     errors.append(f"Required parameter '{param.name}' is missing")
@@ -95,8 +95,27 @@ class Command(ABC):
                     if param.choices:
                         errors.append(f"Parameter '{param.name}' must be one of: {', '.join(param.choices)}")
                     else:
-                        errors.append(f"Parameter '{param.name}' has invalid value")
-        
+                        # Enhanced error messages for different parameter types
+                        if param.type == int and isinstance(value, str):
+                            try:
+                                int(value)
+                                errors.append(f"Parameter '{param.name}' has invalid value: {value}")
+                            except ValueError:
+                                errors.append(f"Parameter '{param.name}' must be a valid integer, got: {value}")
+                        elif param.type == float and isinstance(value, str):
+                            try:
+                                float(value)
+                                errors.append(f"Parameter '{param.name}' has invalid value: {value}")
+                            except ValueError:
+                                errors.append(f"Parameter '{param.name}' must be a valid number, got: {value}")
+                        elif param.type == bool and isinstance(value, str):
+                            if value.lower() not in ['true', 'false', '1', '0', 'yes', 'no', 'on', 'off']:
+                                errors.append(f"Parameter '{param.name}' must be a boolean (true/false), got: {value}")
+                            else:
+                                errors.append(f"Parameter '{param.name}' has invalid value: {value}")
+                        else:
+                            errors.append(f"Parameter '{param.name}' has invalid value: {value}")
+
         return errors
     
     def get_help_text(self) -> str:
