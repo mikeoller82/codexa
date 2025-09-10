@@ -173,6 +173,153 @@ When enhanced features are available, Codexa includes:
 - Verify graceful degradation scenarios
 - Test provider switching functionality
 
+## Serena MCP Server Integration
+
+Codexa integrates with Serena MCP server for advanced semantic code analysis and editing capabilities. Serena provides language server integration for intelligent code operations.
+
+### Features
+- **Semantic Code Analysis**: Symbol search, reference finding, code structure analysis
+- **Intelligent File Operations**: Language-aware editing, pattern search, regex replacement
+- **Project Management**: Project activation, onboarding, indexing for better analysis
+- **Shell Execution**: Context-aware command execution with project awareness
+- **Memory System**: Project-specific knowledge storage and retrieval
+
+### Configuration
+
+Enable Serena in your `~/.codexarc` configuration:
+
+```yaml
+mcp_servers:
+  serena:
+    enabled: true
+    command: ["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"]
+    args: ["--context", "ide-assistant"]
+    timeout: 30
+    project_path: null  # Set to auto-activate a project
+    auto_index: true
+    deployment_mode: "uvx"  # Options: uvx, local, docker
+```
+
+### Deployment Options
+
+**Option 1: uvx (Recommended)**
+```yaml
+serena:
+  command: ["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"]
+  args: ["--context", "ide-assistant"]
+```
+
+**Option 2: Local Installation**
+```bash
+git clone https://github.com/oraios/serena
+cd serena
+```
+```yaml
+serena:
+  command: ["uv", "run", "--directory", "/path/to/serena", "serena", "start-mcp-server"]
+  args: ["--context", "ide-assistant"]
+```
+
+**Option 3: Docker (Experimental)**
+```yaml
+serena:
+  command: ["docker", "run", "--rm", "-i", "--network", "host", "-v", "/your/projects:/workspaces/projects", "ghcr.io/oraios/serena:latest", "serena", "start-mcp-server"]
+  args: ["--transport", "stdio"]
+```
+
+### Available Tools
+
+Serena provides the following tool categories:
+
+**Semantic Code Analysis:**
+- `serena_code_analysis` - Analyze file symbols and project structure
+- `serena_symbol_search` - Search for functions, classes, variables across codebase
+- `serena_reference_search` - Find all references to a symbol
+
+**File Operations:**
+- `serena_file_operations` - Read, create, modify files with semantic awareness
+- `serena_pattern_search` - Search patterns across project files with filtering
+
+**Project Management:**
+- `serena_project_management` - Activate projects, perform onboarding
+- `serena_memory_management` - Store and retrieve project-specific knowledge
+
+**Development Operations:**
+- `serena_shell_execution` - Execute commands with project context
+
+### Usage Examples
+
+**Activate a Project:**
+```
+Activate project /path/to/my/project
+```
+
+**Analyze Code Structure:**
+```
+Show me the symbols in src/main.py
+Analyze the project structure
+```
+
+**Search for Code:**
+```
+Find function "calculateTotal"
+Search for class "UserManager" 
+Find all references to variable at src/utils.py:45:12
+```
+
+**File Operations:**
+```
+Read file src/config.py
+Create file utils/helper.py with content "def helper(): pass"
+Replace pattern "oldFunction" with "newFunction" in src/main.py
+```
+
+**Shell Commands:**
+```
+Run npm test
+Execute python setup.py build
+Run git status
+```
+
+**Memory Management:**
+```
+Write memory "project_info" with "This project uses FastAPI with PostgreSQL"
+Read memory "project_info"
+List all memories
+```
+
+### Context Modes
+
+Serena supports different context modes optimized for various use cases:
+
+- `ide-assistant` (default) - Optimized for IDE integration and coding assistance
+- `desktop-app` - For desktop application usage
+- `agent` - For autonomous agent scenarios
+
+### Performance Tips
+
+1. **Enable Project Indexing**: Run onboarding when first activating a project
+2. **Use Semantic Operations**: Leverage symbol-based operations over text search when possible
+3. **Project Memory**: Store important project context in memories for better results
+4. **Appropriate Context**: Choose the right context mode for your use case
+
+### Troubleshooting
+
+**Serena Server Not Starting:**
+- Ensure uvx or uv is installed and available
+- Check network access to GitHub for uvx installation
+- Verify project path permissions
+
+**Project Operations Failing:**
+- Ensure project is activated first
+- Run project onboarding for better semantic analysis
+- Check that language servers are available for your file types
+
+**Tool Discovery Issues:**
+- Restart Codexa if new Serena tools aren't appearing
+- Check MCP service status in debug output
+- Verify Serena server is connected and healthy
+
 ## OpenRouter Tool Calling
 
 Codexa supports OpenRouter's tool calling functionality for enhanced AI interactions:

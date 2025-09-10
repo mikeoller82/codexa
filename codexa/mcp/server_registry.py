@@ -280,12 +280,106 @@ class MCPServerRegistry:
                 return matches
             return []
         
+        # Rule 5: Semantic code operations (Serena)
+        def semantic_code_rule(request: str, context: Dict) -> List[CapabilityMatch]:
+            semantic_keywords = [
+                "symbol", "function", "class", "method", "variable", "reference", 
+                "definition", "semantic", "language server", "ast", "parse",
+                "refactor", "rename", "find symbol", "code structure"
+            ]
+            request_lower = request.lower()
+            
+            if any(keyword in request_lower for keyword in semantic_keywords):
+                matches = []
+                for server in self.find_servers_by_capability("semantic-analysis"):
+                    matches.append(CapabilityMatch(
+                        server_name=server,
+                        confidence=0.9,
+                        capabilities=["semantic-analysis", "code-editing", "symbol-search"],
+                        metadata={"rule": "semantic_code"}
+                    ))
+                return matches
+            return []
+        
+        # Rule 6: Project management and onboarding (Serena)
+        def project_management_rule(request: str, context: Dict) -> List[CapabilityMatch]:
+            project_keywords = [
+                "project", "onboard", "index", "analyze codebase", "activate project",
+                "project structure", "codebase analysis", "project setup"
+            ]
+            request_lower = request.lower()
+            
+            if any(keyword in request_lower for keyword in project_keywords):
+                matches = []
+                for server in self.find_servers_by_capability("project-management"):
+                    matches.append(CapabilityMatch(
+                        server_name=server,
+                        confidence=0.8,
+                        capabilities=["project-management", "onboarding"],
+                        metadata={"rule": "project_management"}
+                    ))
+                return matches
+            return []
+        
+        # Rule 7: Shell execution and build commands (Serena)
+        def shell_execution_rule(request: str, context: Dict) -> List[CapabilityMatch]:
+            shell_keywords = [
+                "run", "execute", "command", "shell", "bash", "terminal",
+                "npm", "pip", "python", "node", "git", "make", "build",
+                "test command", "install", "deploy", "start", "stop"
+            ]
+            request_lower = request.lower()
+            
+            # Check for command-like patterns
+            has_shell_pattern = (
+                any(keyword in request_lower for keyword in shell_keywords) or
+                any(pattern in request for pattern in ["npm ", "pip ", "git ", "python ", "node ", "make ", "$"])
+            )
+            
+            if has_shell_pattern:
+                matches = []
+                for server in self.find_servers_by_capability("shell-execution"):
+                    matches.append(CapabilityMatch(
+                        server_name=server,
+                        confidence=0.8,
+                        capabilities=["shell-execution", "project-commands"],
+                        metadata={"rule": "shell_execution"}
+                    ))
+                return matches
+            return []
+        
+        # Rule 8: Advanced file operations (Serena with semantic awareness)
+        def semantic_file_rule(request: str, context: Dict) -> List[CapabilityMatch]:
+            file_keywords = [
+                "smart edit", "semantic edit", "intelligent replace", 
+                "pattern search", "regex replace", "code modification",
+                "file analysis", "symbol editing"
+            ]
+            request_lower = request.lower()
+            
+            if any(keyword in request_lower for keyword in file_keywords):
+                matches = []
+                for server in self.find_servers_by_capability("semantic-analysis"):
+                    if "file-operations" in self.server_metadata.get(server, {}).get("capabilities", []):
+                        matches.append(CapabilityMatch(
+                            server_name=server,
+                            confidence=0.8,
+                            capabilities=["semantic-analysis", "file-operations", "pattern-search"],
+                            metadata={"rule": "semantic_file"}
+                        ))
+                return matches
+            return []
+        
         # Add default rules
         self.routing_rules.extend([
             documentation_rule,
             analysis_rule,
             ui_generation_rule,
-            testing_rule
+            testing_rule,
+            semantic_code_rule,
+            project_management_rule,
+            shell_execution_rule,
+            semantic_file_rule
         ])
     
     def diagnose_routing(self, request: str, 

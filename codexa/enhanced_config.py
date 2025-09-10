@@ -200,6 +200,15 @@ class EnhancedConfig:
                 }
             },
             "mcp_servers": {
+                "serena": {
+                    "command": ["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
+                    "args": ["--context", "ide-assistant"],
+                    "enabled": False,
+                    "timeout": 30,
+                    "project_path": None,  # Set to activate a specific project
+                    "auto_index": True,
+                    "deployment_mode": "uvx"  # Options: uvx, local, docker
+                },
                 "context7": {
                     "command": ["npx", "-y", "@modelcontextprotocol/server-context7"],
                     "enabled": False,
@@ -298,6 +307,19 @@ class EnhancedConfig:
                 capabilities=["filesystem", "file_operations", "directory_operations", "file_search"],
                 priority=10,  # High priority for core operations
                 timeout=10  # Reasonable timeout for filesystem operations
+            ),
+            "serena": MCPServerConfig(
+                name="serena",
+                command=["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
+                args=["--context", "ide-assistant"],
+                enabled=False,  # Disabled by default, enable via user config
+                capabilities=[
+                    "semantic-analysis", "code-editing", "symbol-search", "language-server",
+                    "project-management", "shell-execution", "memory", "onboarding",
+                    "file-operations", "pattern-search", "code-refactoring"
+                ],
+                priority=5,  # High priority for semantic operations
+                timeout=30  # Reasonable timeout for language server operations
             ),
             "context7": MCPServerConfig(
                 name="context7",

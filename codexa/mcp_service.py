@@ -12,6 +12,7 @@ from .mcp.connection_manager import MCPConnectionManager, MCPServerConfig
 from .mcp.server_registry import MCPServerRegistry, CapabilityMatch
 from .mcp.health_monitor import MCPHealthMonitor, HealthStatus
 from .mcp.protocol import MCPError
+from .mcp.serena_client import SerenaClient, SerenaManager
 from .enhanced_config import EnhancedConfig, MCPServerConfig as ConfigMCPServer
 
 
@@ -26,6 +27,9 @@ class MCPService:
         self.connection_manager = MCPConnectionManager()
         self.server_registry = MCPServerRegistry(self.connection_manager)
         self.health_monitor = MCPHealthMonitor(self.connection_manager)
+        
+        # Serena specialized components
+        self.serena_manager = SerenaManager()
         
         # Service state
         self.is_running = False
@@ -55,6 +59,11 @@ class MCPService:
             self.connection_manager.add_server(server_config)
             self.server_registry.register_server(server_config)
             
+            # Special handling for Serena server
+            if name == "serena":
+                serena_client = self.serena_manager.add_client(name, server_config)
+                self.logger.info(f"Added Serena client: {name}")
+            
             self.logger.info(f"Configured MCP server: {name}")
     
     async def start(self) -> bool:
@@ -68,6 +77,9 @@ class MCPService:
             
             # Start connection manager
             await self.connection_manager.start()
+            
+            # Start Serena clients
+            await self.serena_manager.connect_all()
             
             # Start health monitoring
             await self.health_monitor.start_monitoring()
@@ -94,6 +106,9 @@ class MCPService:
         
         # Stop health monitoring
         await self.health_monitor.stop_monitoring()
+        
+        # Stop Serena clients
+        await self.serena_manager.disconnect_all()
         
         # Stop connection manager
         await self.connection_manager.stop()
@@ -232,6 +247,19 @@ class MCPService:
     def get_available_servers(self) -> List[str]:
         """Get list of available MCP servers."""
         return self.connection_manager.get_available_servers()
+    
+    def get_serena_client(self, name: Optional[str] = None) -> Optional[SerenaClient]:
+        """Get Serena client instance."""
+        return self.serena_manager.get_client(name)
+    
+    def get_serena_capabilities(self) -> Dict[str, Any]:
+        """Get capabilities of Serena clients."""
+        capabilities = {}
+        for name in self.serena_manager.get_available_clients():
+            client = self.serena_manager.get_client(name)
+            if client:
+                capabilities[name] = client.get_capabilities()
+        return capabilities
     
     def get_server_capabilities(self, server_name: Optional[str] = None) -> Dict[str, Any]:
         """Get capabilities for specific server or all servers."""
