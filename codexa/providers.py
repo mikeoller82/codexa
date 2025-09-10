@@ -6,7 +6,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import openai
 import anthropic
 from .config import Config
@@ -16,8 +16,8 @@ class AIProvider(ABC):
     """Abstract base class for AI providers."""
 
     @abstractmethod
-    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None) -> str:
-        """Ask the AI provider a question."""
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
+        """Ask the AI provider a question with optional tool support."""
         pass
 
     @abstractmethod
@@ -29,6 +29,16 @@ class AIProvider(ABC):
     def get_available_models(self) -> List[Dict[str, str]]:
         """Get list of available models from the provider API."""
         pass
+
+    def ask_with_tools(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> Union[str, Dict]:
+        """Send a request with tools and handle tool calling responses."""
+        # Default implementation - can be overridden by subclasses
+        return "Tool calling not implemented for this provider"
+
+    def continue_with_tool_results(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> str:
+        """Continue conversation after tool execution with results."""
+        # Default implementation - can be overridden by subclasses
+        return "Tool result continuation not implemented for this provider"
 
 
 class OpenAIProvider(AIProvider):
@@ -44,8 +54,8 @@ class OpenAIProvider(AIProvider):
         else:
             self.client = None
 
-    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None) -> str:
-        """Ask OpenAI a question."""
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
+        """Ask OpenAI a question with optional tool support."""
         if not self.client:
             return "Error: OpenAI API key not configured."
 
@@ -53,24 +63,60 @@ class OpenAIProvider(AIProvider):
             messages = [
                 {"role": "system", "content": self._get_system_prompt(context)}
             ]
-            
+
             # Add conversation history
             if history:
                 for msg in history[-10:]:  # Keep last 10 messages to avoid token limits
                     messages.append({"role": "user", "content": msg.get("user", "")})
                     messages.append({"role": "assistant", "content": msg.get("assistant", "")})
-            
+
             messages.append({"role": "user", "content": prompt})
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=2048
-            )
-            
-            return response.choices[0].message.content or "No response from OpenAI."
-            
+            # Prepare request parameters
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 2048
+            }
+
+            # Add tools if provided
+            if tools:
+                request_params["tools"] = tools
+
+            response = self.client.chat.completions.create(**request_params)
+
+            if response.choices and len(response.choices) > 0:
+                choice = response.choices[0]
+                message = choice.message
+
+                # Check if this is a tool call response
+                if message.tool_calls:
+                    return {
+                        'type': 'tool_calls',
+                        'message': {
+                            'role': message.role,
+                            'content': message.content,
+                            'tool_calls': [
+                                {
+                                    'id': tool_call.id,
+                                    'type': tool_call.type,
+                                    'function': {
+                                        'name': tool_call.function.name,
+                                        'arguments': tool_call.function.arguments
+                                    }
+                                } for tool_call in message.tool_calls
+                            ]
+                        },
+                        'tool_calls': message.tool_calls,
+                        'finish_reason': choice.finish_reason
+                    }
+
+                # Regular text response
+                return message.content or "No response from OpenAI."
+            else:
+                return "Unexpected response format from OpenAI."
+
         except Exception as e:
             return f"Error calling OpenAI: {str(e)}"
 
@@ -123,36 +169,75 @@ class AnthropicProvider(AIProvider):
         else:
             self.client = None
 
-    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None) -> str:
-        """Ask Anthropic a question."""
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
+        """Ask Anthropic a question with optional tool support."""
         if not self.client:
             return "Error: Anthropic API key not configured."
 
         try:
-            # Build conversation history
+            system_prompt = self._get_system_prompt(context)
+
             messages = []
-            
+
+            # Add conversation history
             if history:
-                for msg in history[-10:]:  # Keep last 10 messages
+                for msg in history[-10:]:  # Keep last 10 messages to avoid token limits
                     if msg.get("user"):
                         messages.append({"role": "user", "content": msg["user"]})
                     if msg.get("assistant"):
                         messages.append({"role": "assistant", "content": msg["assistant"]})
-            
+
             messages.append({"role": "user", "content": prompt})
 
-            system_prompt = self._get_system_prompt(context)
+            # Prepare request parameters
+            request_params = {
+                "model": self.model,
+                "max_tokens": 2048,
+                "temperature": 0.3,
+                "system": system_prompt,
+                "messages": messages
+            }
 
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=2048,
-                temperature=0.3,
-                system=system_prompt,
-                messages=messages
-            )
-            
-            return response.content[0].text or "No response from Anthropic."
-            
+            # Add tools if provided (Anthropic uses 'tools' parameter)
+            if tools:
+                request_params["tools"] = tools
+
+            response = self.client.messages.create(**request_params)
+
+            if response.content and len(response.content) > 0:
+                # Check for tool calls in Anthropic's response format
+                for content_block in response.content:
+                    if hasattr(content_block, 'type') and content_block.type == 'tool_use':
+                        return {
+                            'type': 'tool_calls',
+                            'message': {
+                                'role': 'assistant',
+                                'content': None,
+                                'tool_calls': [{
+                                    'id': content_block.id,
+                                    'type': 'function',
+                                    'function': {
+                                        'name': content_block.name,
+                                        'arguments': content_block.input
+                                    }
+                                }]
+                            },
+                            'tool_calls': [{
+                                'id': content_block.id,
+                                'type': 'function',
+                                'function': {
+                                    'name': content_block.name,
+                                    'arguments': content_block.input
+                                }
+                            }],
+                            'finish_reason': 'tool_calls'
+                        }
+
+                # Regular text response
+                return response.content[0].text
+            else:
+                return "No response from Anthropic."
+
         except Exception as e:
             return f"Error calling Anthropic: {str(e)}"
 
@@ -215,8 +300,8 @@ class OpenRouterProvider(AIProvider):
             "X-Title": "Codexa - AI Coding Assistant",  # Optional site title for rankings
         }
 
-    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None) -> str:
-        """Ask OpenRouter a question."""
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
+        """Ask OpenRouter a question with optional tool support."""
         if not self.api_key:
             return "Error: OpenRouter API key not configured."
 
@@ -224,7 +309,7 @@ class OpenRouterProvider(AIProvider):
             messages = [
                 {"role": "system", "content": self._get_system_prompt(context)}
             ]
-            
+
             # Add conversation history
             if history:
                 for msg in history[-10:]:  # Keep last 10 messages to avoid token limits
@@ -232,7 +317,7 @@ class OpenRouterProvider(AIProvider):
                         messages.append({"role": "user", "content": msg["user"]})
                     if msg.get("assistant"):
                         messages.append({"role": "assistant", "content": msg["assistant"]})
-            
+
             messages.append({"role": "user", "content": prompt})
 
             payload = {
@@ -243,13 +328,17 @@ class OpenRouterProvider(AIProvider):
                 "stream": False
             }
 
+            # Add tools if provided
+            if tools:
+                payload["tools"] = tools
+
             response = requests.post(
                 self.base_url,
                 json=payload,
                 headers=self.headers,
                 timeout=60  # Increased timeout for OpenRouter
             )
-            
+
             # Check for HTTP errors
             if response.status_code != 200:
                 error_detail = ""
@@ -259,25 +348,141 @@ class OpenRouterProvider(AIProvider):
                 except:
                     error_detail = response.text
                 return f"OpenRouter API error ({response.status_code}): {error_detail}"
-            
+
             data = response.json()
-            
+
             # Handle OpenRouter error responses
             if 'error' in data:
                 error_msg = data['error'].get('message', str(data['error']))
                 return f"OpenRouter error: {error_msg}"
-            
+
             if 'choices' in data and len(data['choices']) > 0:
-                return data['choices'][0]['message']['content'] or "No response from OpenRouter."
+                choice = data['choices'][0]
+                message = choice['message']
+
+                # Check if this is a tool call response
+                if message.get('tool_calls'):
+                    return {
+                        'type': 'tool_calls',
+                        'message': message,
+                        'tool_calls': message['tool_calls'],
+                        'finish_reason': choice.get('finish_reason', 'tool_calls')
+                    }
+
+                # Regular text response
+                return message.get('content', "No response from OpenRouter.")
             else:
                 return f"Unexpected response format from OpenRouter: {data}"
-            
+
         except requests.exceptions.Timeout:
             return "OpenRouter request timed out. Please try again."
         except requests.exceptions.ConnectionError:
             return "Failed to connect to OpenRouter. Please check your internet connection."
         except requests.exceptions.RequestException as e:
             return f"Network error calling OpenRouter: {str(e)}"
+        except Exception as e:
+            return f"Error calling OpenRouter: {str(e)}"
+
+    def ask_with_tools(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> Union[str, Dict]:
+        """Send a request with tools and handle tool calling responses."""
+        if not self.api_key:
+            return "Error: OpenRouter API key not configured."
+
+        try:
+            payload = {
+                "model": model or self.model,
+                "messages": messages,
+                "tools": tools,
+                "temperature": 0.3,
+                "max_tokens": 2048,
+                "stream": False
+            }
+
+            response = requests.post(
+                self.base_url,
+                json=payload,
+                headers=self.headers,
+                timeout=60
+            )
+
+            if response.status_code != 200:
+                error_detail = ""
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get('error', {}).get('message', str(error_data))
+                except:
+                    error_detail = response.text
+                return f"OpenRouter API error ({response.status_code}): {error_detail}"
+
+            data = response.json()
+
+            if 'error' in data:
+                error_msg = data['error'].get('message', str(data['error']))
+                return f"OpenRouter error: {error_msg}"
+
+            if 'choices' in data and len(data['choices']) > 0:
+                choice = data['choices'][0]
+                message = choice['message']
+
+                # Return tool calls if present
+                if message.get('tool_calls'):
+                    return {
+                        'type': 'tool_calls',
+                        'message': message,
+                        'tool_calls': message['tool_calls'],
+                        'finish_reason': choice.get('finish_reason', 'tool_calls')
+                    }
+
+                # Regular response
+                return message.get('content', "No response from OpenRouter.")
+            else:
+                return f"Unexpected response format from OpenRouter: {data}"
+
+        except Exception as e:
+            return f"Error calling OpenRouter: {str(e)}"
+
+    def continue_with_tool_results(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> str:
+        """Continue conversation after tool execution with results."""
+        if not self.api_key:
+            return "Error: OpenRouter API key not configured."
+
+        try:
+            payload = {
+                "model": model or self.model,
+                "messages": messages,
+                "tools": tools,  # Must include tools in every request
+                "temperature": 0.3,
+                "max_tokens": 2048,
+                "stream": False
+            }
+
+            response = requests.post(
+                self.base_url,
+                json=payload,
+                headers=self.headers,
+                timeout=60
+            )
+
+            if response.status_code != 200:
+                error_detail = ""
+                try:
+                    error_data = response.json()
+                    error_detail = error_data.get('error', {}).get('message', str(error_data))
+                except:
+                    error_detail = response.text
+                return f"OpenRouter API error ({response.status_code}): {error_detail}"
+
+            data = response.json()
+
+            if 'error' in data:
+                error_msg = data['error'].get('message', str(data['error']))
+                return f"OpenRouter error: {error_msg}"
+
+            if 'choices' in data and len(data['choices']) > 0:
+                return data['choices'][0]['message'].get('content', "No response from OpenRouter.")
+            else:
+                return f"Unexpected response format from OpenRouter: {data}"
+
         except Exception as e:
             return f"Error calling OpenRouter: {str(e)}"
 
@@ -336,23 +541,26 @@ class OpenRouterProvider(AIProvider):
 
 
 class OpenRouterOAIProvider(AIProvider):
-    """OpenRouter provider using OpenAI Python client implementation with tool calling support."""
+    """OpenRouter provider using OpenAI-compatible interface."""
 
     def __init__(self, config: Config):
         self.config = config
         self.api_key = config.get_api_key("openrouter")
         self.model = config.get_model("openrouter")
-        self.base_url = "https://openrouter.ai/api/v1"
-        
+
         if self.api_key:
             self.client = openai.OpenAI(
-                base_url=self.base_url,
+                base_url="https://openrouter.ai/api/v1",
                 api_key=self.api_key,
+                default_headers={
+                    "HTTP-Referer": "https://codexa.ai",
+                    "X-Title": "Codexa - AI Coding Assistant",
+                }
             )
         else:
             self.client = None
 
-    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None) -> str:
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None, context: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
         """Ask OpenRouter a question using OpenAI client."""
         if not self.client:
             return "Error: OpenRouter API key not configured."
@@ -372,22 +580,132 @@ class OpenRouterOAIProvider(AIProvider):
             
             messages.append({"role": "user", "content": prompt})
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.3,
-                max_tokens=2048,
-                extra_headers={
+            # Prepare request parameters
+            request_params = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": 0.3,
+                "max_tokens": 2048,
+                "extra_headers": {
                     "HTTP-Referer": "https://codexa.ai",  # Optional site URL for rankings
                     "X-Title": "Codexa - AI Coding Assistant",  # Optional site title for rankings
                 },
-                extra_body={}
-            )
-            
-            return response.choices[0].message.content or "No response from OpenRouter."
+                "extra_body": {}
+            }
+
+            # Add tools if provided
+            if tools:
+                request_params["tools"] = tools
+
+            response = self.client.chat.completions.create(**request_params)
+
+            if response.choices and len(response.choices) > 0:
+                choice = response.choices[0]
+                message = choice.message
+
+                # Check if this is a tool call response
+                if message.tool_calls:
+                    return {
+                        'type': 'tool_calls',
+                        'message': {
+                            'role': message.role,
+                            'content': message.content,
+                            'tool_calls': [
+                                {
+                                    'id': tool_call.id,
+                                    'type': tool_call.type,
+                                    'function': {
+                                        'name': tool_call.function.name,
+                                        'arguments': tool_call.function.arguments
+                                    }
+                                } for tool_call in message.tool_calls
+                            ]
+                        },
+                        'tool_calls': message.tool_calls,
+                        'finish_reason': choice.finish_reason
+                    }
+
+                # Regular text response
+                return message.content or "No response from OpenRouter."
             
         except Exception as e:
             return f"Error calling OpenRouter (OAI): {str(e)}"
+
+    def ask_with_tools(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> Union[str, Dict]:
+        """Send a request with tools and handle tool calling responses."""
+        if not self.client:
+            return "Error: OpenRouter API key not configured."
+
+        try:
+            response = self.client.chat.completions.create(
+                model=model or self.model,
+                messages=messages,
+                tools=tools,
+                temperature=0.3,
+                max_tokens=2048,
+                extra_headers={
+                    "HTTP-Referer": "https://codexa.ai",
+                    "X-Title": "Codexa - AI Coding Assistant",
+                }
+            )
+
+            if response.choices and len(response.choices) > 0:
+                choice = response.choices[0]
+                message = choice.message
+
+                # Check if this is a tool call response
+                if message.tool_calls:
+                    return {
+                        'type': 'tool_calls',
+                        'message': {
+                            'role': message.role,
+                            'content': message.content,
+                            'tool_calls': [
+                                {
+                                    'id': tool_call.id,
+                                    'type': tool_call.type,
+                                    'function': {
+                                        'name': tool_call.function.name,
+                                        'arguments': tool_call.function.arguments
+                                    }
+                                } for tool_call in message.tool_calls
+                            ]
+                        },
+                        'tool_calls': message.tool_calls,
+                        'finish_reason': choice.finish_reason
+                    }
+
+                # Regular response
+                return message.content or "No response from OpenRouter."
+
+        except Exception as e:
+            return f"Error calling OpenRouter: {str(e)}"
+
+    def continue_with_tool_results(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> str:
+        """Continue conversation after tool execution with results."""
+        if not self.client:
+            return "Error: OpenRouter API key not configured."
+
+        try:
+            response = self.client.chat.completions.create(
+                model=model or self.model,
+                messages=messages,
+                tools=tools,  # Must include tools in every request
+                temperature=0.3,
+                max_tokens=2048,
+                extra_headers={
+                    "HTTP-Referer": "https://codexa.ai",
+                    "X-Title": "Codexa - AI Coding Assistant",
+                }
+            )
+
+            if response.choices and len(response.choices) > 0:
+                return response.choices[0].message.content or "No response from OpenRouter."
+            else:
+                return "Unexpected response format from OpenRouter."
+
+        except Exception as e:
+            return f"Error calling OpenRouter: {str(e)}"
 
     def call_with_tools(self, messages: List[Dict], tools: Optional[List[Dict]] = None, 
                        tool_choice: str = "auto", max_iterations: int = 10) -> Dict:

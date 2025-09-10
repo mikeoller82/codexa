@@ -173,8 +173,8 @@ class EnhancedAIProvider(AIProvider):
             self.metrics.uptime_start = datetime.now()
     
     def ask(self, prompt: str, history: Optional[List[Dict]] = None,
-             context: Optional[str] = None, model: Optional[str] = None) -> str:
-        """Enhanced ask method with metrics tracking."""
+             context: Optional[str] = None, model: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
+        """Enhanced ask method with metrics tracking and tool support."""
         start_time = datetime.now()
 
         try:
@@ -183,8 +183,12 @@ class EnhancedAIProvider(AIProvider):
                 original_model = self.base_provider.model
                 self.base_provider.model = model
 
-            # Call base provider (synchronous call)
-            response = self.base_provider.ask(prompt, history, context)
+            # Call base provider with tool support
+            if hasattr(self.base_provider, 'ask') and 'tools' in self.base_provider.ask.__code__.co_varnames:
+                response = self.base_provider.ask(prompt, history, context, tools)
+            else:
+                # Fallback for providers without tool support
+                response = self.base_provider.ask(prompt, history, context)
 
             # Restore original model
             if model and hasattr(self.base_provider, 'model'):
@@ -206,13 +210,46 @@ class EnhancedAIProvider(AIProvider):
             raise
 
     async def ask_async(self, prompt: str, history: Optional[List[Dict]] = None,
-                       context: Optional[str] = None, model: Optional[str] = None) -> str:
+                       context: Optional[str] = None, model: Optional[str] = None, tools: Optional[List[Dict]] = None) -> Union[str, Dict]:
         """Async version of ask method for compatibility with async interfaces."""
         # Since the base provider's ask method is synchronous, we run it in a thread pool
         import asyncio
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.ask, prompt, history, context, model)
-    
+        return await loop.run_in_executor(None, self.ask, prompt, history, context, model, tools)
+
+    async def ask_with_tools_async(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> Union[str, Dict]:
+        """Async version of ask_with_tools for tool calling workflow."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        if hasattr(self.base_provider, 'ask_with_tools'):
+            return await loop.run_in_executor(None, self.base_provider.ask_with_tools, messages, tools, model)
+        else:
+            # Fallback - convert to simple ask format
+            if messages:
+                last_message = messages[-1]
+                if last_message.get('role') == 'user':
+                    prompt = last_message.get('content', '')
+                    # Convert messages to history format
+                    history = []
+                    for msg in messages[:-1]:
+                        if msg.get('role') in ['user', 'assistant']:
+                            history.append({
+                                'user' if msg['role'] == 'user' else 'assistant': msg.get('content', '')
+                            })
+                    return await loop.run_in_executor(None, self.ask, prompt, history, None, model, tools)
+            return "Error: Tool calling not supported by base provider"
+
+    async def continue_with_tool_results_async(self, messages: List[Dict], tools: List[Dict], model: Optional[str] = None) -> str:
+        """Async version of continue_with_tool_results."""
+        import asyncio
+        loop = asyncio.get_event_loop()
+
+        if hasattr(self.base_provider, 'continue_with_tool_results'):
+            return await loop.run_in_executor(None, self.base_provider.continue_with_tool_results, messages, tools, model)
+        else:
+            return "Error: Tool result continuation not supported by base provider"
+
     def is_available(self) -> bool:
         """Check if provider is available."""
         return self.base_provider.is_available()
