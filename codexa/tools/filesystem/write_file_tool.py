@@ -55,6 +55,29 @@ class WriteFileTool(Tool):
         
         return 0.0
     
+    async def validate_context(self, context: ToolContext) -> bool:
+        """Validate context for write_file tool with flexible parameter extraction."""
+        # Basic validation - we need at least a user request to extract from
+        if not hasattr(context, 'user_request') or not context.user_request:
+            self.logger.error("No user request available for parameter extraction")
+            return False
+        
+        # Check if parameters are already available
+        file_path = context.get_state("file_path")
+        content = context.get_state("content")
+        
+        # If parameters are missing, try to extract them from the request
+        if not file_path or content is None:
+            extracted = self._extract_file_and_content(context.user_request)
+            if not extracted.get("file_path"):
+                self.logger.error(f"Cannot extract file path from request: '{context.user_request}'")
+                return False
+            # For content, we allow empty strings (empty file creation is valid)
+            # The extraction method returns empty string, not None, when nothing found
+            # So we accept any string value, including empty string
+        
+        return True
+    
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute file writing."""
         try:
@@ -135,27 +158,65 @@ class WriteFileTool(Tool):
         path.write_text(content, encoding='utf-8')
     
     def _extract_file_and_content(self, request: str) -> dict:
-        """Extract file path and content from request string."""
+        """Extract file path and content from request string using improved patterns."""
         result = {"file_path": "", "content": ""}
         
-        # Look for file paths with extensions
+        # Pattern 1: Direct content with explicit destination - "write 'content' to file.txt"
+        content_to_file_patterns = [
+            r'(?:write|save)\s+["\']([^"\']+)["\']\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
+            r'(?:write|save)\s+(.+?)\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
+        ]
+        
+        for pattern in content_to_file_patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                result["content"], result["file_path"] = match.groups()
+                result["content"] = result["content"].strip().strip('"\'')
+                return result
+        
+        # Pattern 2: File with content - "create file.txt with 'content'"
+        file_with_content_patterns = [
+            r'(?:create|write|make)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+["\']([^"\']+)["\']',
+            r'(?:create|write|make).*?(?:file|called)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+(.+)',
+        ]
+        
+        for pattern in file_with_content_patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                result["file_path"], result["content"] = match.groups()
+                result["content"] = result["content"].strip().strip('"\'')
+                return result
+        
+        # Pattern 3: Just file creation - "create file.txt", "make README.md"
+        file_creation_patterns = [
+            r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:file\s+)?(?:called\s+)?([^\s]+\.[a-zA-Z0-9]+)',
+            r'(?:create|make|write)\s+(?:a\s+)?([A-Z][A-Z0-9]*(?:\.[a-zA-Z0-9]+)?)',  # README, CHANGELOG, etc.
+        ]
+        
+        for pattern in file_creation_patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                result["file_path"] = match.group(1)
+                result["content"] = ""  # Empty content for simple file creation
+                return result
+        
+        # Pattern 4: Generic file path extraction  
         file_pattern = r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'
         file_matches = re.findall(file_pattern, request)
         if file_matches:
             result["file_path"] = file_matches[0]
-        
-        # Look for quoted content
-        content_patterns = [
-            r'content[:\s]*["\']([^"\']+)["\']',
-            r'with[:\s]*["\']([^"\']+)["\']',
-            r'```([^`]+)```',  # Code blocks
-            r'["\']([^"\']{20,})["\']'  # Long quoted strings
-        ]
-        
-        for pattern in content_patterns:
-            matches = re.findall(pattern, request, re.DOTALL | re.IGNORECASE)
-            if matches:
-                result["content"] = matches[0].strip()
-                break
+            
+            # Look for content in quotes or code blocks
+            content_patterns = [
+                r'```([^`]+)```',  # Code blocks
+                r'["\']([^"\']{2,})["\']',  # Quoted strings
+                r'content[:\s]+["\']([^"\']+)["\']',  # Explicit content: "..."
+            ]
+            
+            for pattern in content_patterns:
+                matches = re.findall(pattern, request, re.DOTALL | re.IGNORECASE)
+                if matches:
+                    result["content"] = matches[0].strip()
+                    break
         
         return result
