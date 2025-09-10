@@ -146,29 +146,33 @@ class MCPConnection:
         """Send request to MCP server."""
         if self.state != ConnectionState.CONNECTED:
             raise MCPError(f"Server {self.config.name} not connected", MCPProtocol.SERVER_UNAVAILABLE)
-        
-        request = MCPProtocol.create_request(method, params)
-        
+
+        # Handle None params (no parameters) vs empty dict
+        if params is None:
+            request = MCPProtocol.create_request(method, None)
+        else:
+            request = MCPProtocol.create_request(method, params)
+
         try:
             start_time = datetime.now()
-            
+
             # Send request
             await self._write_message(request)
-            
+
             # Create future for response
             future = asyncio.Future()
             self.pending_requests[request.id] = future
-            
+
             # Wait for response with timeout
             try:
                 response = await asyncio.wait_for(future, timeout=self.config.timeout)
-                
+
                 # Update metrics
                 response_time = (datetime.now() - start_time).total_seconds()
                 self.metrics.total_requests += 1
                 self.metrics.last_request_time = datetime.now()
                 self._update_average_response_time(response_time)
-                
+
                 # Return the result from the MCPMessage, handling errors
                 if response.error:
                     error_code = response.error.get("code", -1)
@@ -185,13 +189,13 @@ class MCPConnection:
                         raise MCPError(f"Server error: {error_message}", error_code)
 
                 return response.result
-                
+
             except asyncio.TimeoutError:
                 self.metrics.failed_requests += 1
                 raise MCPError(f"Request timeout for {self.config.name}", MCPProtocol.TIMEOUT_ERROR)
             finally:
                 self.pending_requests.pop(request.id, None)
-                
+
         except Exception as e:
             self.metrics.failed_requests += 1
             self.logger.error(f"Request failed for {self.config.name}: {e}")

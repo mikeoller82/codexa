@@ -164,63 +164,65 @@ class SerenaClient:
             raise MCPError(f"Tool not available: {tool_name}")
 
         try:
-            # Prepare tool call request - try different parameter formats
-            # First try the standard MCP format
-            params = {
-                "name": tool_name,
-                "arguments": parameters
-            }
-
             # Set timeout if specified
             original_timeout = self.connection.config.timeout
             if timeout:
                 self.connection.config.timeout = int(timeout)
 
-            try:
-                result = await self.connection.send_request("tools/call", params)
+            # Try different parameter formats for tools/call
+            param_formats = [
+                # Standard MCP format
+                {
+                    "name": tool_name,
+                    "arguments": parameters
+                },
+                # Alternative format that some servers expect
+                {
+                    "tool": tool_name,
+                    "parameters": parameters
+                },
+                # Direct parameters (some servers expect this)
+                parameters
+            ]
 
-                # Parse tool result
-                if isinstance(result, dict):
-                    if "content" in result:
-                        # Extract content from MCP tool response
-                        content = result["content"]
-                        if isinstance(content, list) and len(content) > 0:
-                            # Return first content item data
-                            return content[0].get("text", content[0])
-                        return content
+            last_error = None
+            for i, params in enumerate(param_formats):
+                try:
+                    self.logger.debug(f"Trying parameter format {i+1} for {tool_name}")
+                    result = await self.connection.send_request("tools/call", params)
+
+                    # Parse tool result
+                    if isinstance(result, dict):
+                        if "content" in result:
+                            # Extract content from MCP tool response
+                            content = result["content"]
+                            if isinstance(content, list) and len(content) > 0:
+                                # Return first content item data
+                                return content[0].get("text", content[0])
+                            return content
+                        return result
+
                     return result
 
-                return result
+                except MCPError as e:
+                    last_error = e
+                    if "Invalid parameters" in str(e):
+                        self.logger.debug(f"Parameter format {i+1} failed for {tool_name}, trying next format")
+                        continue
+                    else:
+                        # Non-parameter error, don't try other formats
+                        raise
+                except Exception as e:
+                    last_error = e
+                    self.logger.debug(f"Parameter format {i+1} failed for {tool_name}: {e}")
+                    continue
 
-            except MCPError as e:
-                if "Invalid parameters" in str(e):
-                    # Try alternative parameter format for Serena
-                    self.logger.warning(f"Standard format failed for {tool_name}, trying alternative format")
-                    alt_params = {
-                        "tool": tool_name,
-                        "parameters": parameters
-                    }
-
-                    try:
-                        result = await self.connection.send_request("tools/call", alt_params)
-                        # Parse result with alternative format
-                        if isinstance(result, dict):
-                            if "content" in result:
-                                content = result["content"]
-                                if isinstance(content, list) and len(content) > 0:
-                                    return content[0].get("text", content[0])
-                                return content
-                            return result
-                        return result
-                    except Exception as alt_e:
-                        self.logger.error(f"Alternative format also failed for {tool_name}: {alt_e}")
-                        raise e  # Raise original error
-                else:
-                    raise
-
-            finally:
-                # Restore original timeout
-                self.connection.config.timeout = original_timeout
+            # If all formats failed, use fallback
+            if last_error and "Invalid parameters" in str(last_error):
+                self.logger.warning(f"All parameter formats failed for {tool_name}, using Claude tool fallback")
+                return await self._get_fallback_response(tool_name, parameters)
+            else:
+                raise last_error or MCPError(f"All parameter formats failed for {tool_name}")
 
         except MCPError as e:
             if "Invalid parameters" in str(e):
@@ -232,6 +234,9 @@ class SerenaClient:
         except Exception as e:
             self.logger.error(f"Tool call failed {tool_name}: {e}")
             raise MCPError(f"Serena tool call failed: {tool_name} - {e}")
+        finally:
+            # Restore original timeout
+            self.connection.config.timeout = original_timeout
     
     # Semantic Code Analysis Methods
     
@@ -418,8 +423,8 @@ class SerenaClient:
     async def _discover_tools(self):
         """Discover available tools from Serena server."""
         try:
-            # Get tools list - try with empty params first
-            result = await self.connection.send_request("tools/list", {})
+            # Get tools list - try without params first (correct MCP protocol)
+            result = await self.connection.send_request("tools/list", None)
 
             if isinstance(result, dict) and "tools" in result:
                 tools = result["tools"]
@@ -428,10 +433,11 @@ class SerenaClient:
                     if isinstance(tool, dict) and "name" in tool:
                         tool_name = tool["name"]
                         self.available_tools[tool_name] = tool
+                        self.logger.debug(f"Discovered tool: {tool_name}")
             else:
-                # If empty params don't work, try with None (no params)
-                self.logger.warning("tools/list with empty params failed, trying without params")
-                result = await self.connection.send_request("tools/list", None)
+                # If no params don't work, try with empty dict as fallback
+                self.logger.warning("tools/list without params failed, trying with empty params")
+                result = await self.connection.send_request("tools/list", {})
 
                 if isinstance(result, dict) and "tools" in result:
                     tools = result["tools"]
@@ -440,6 +446,7 @@ class SerenaClient:
                         if isinstance(tool, dict) and "name" in tool:
                             tool_name = tool["name"]
                             self.available_tools[tool_name] = tool
+                            self.logger.debug(f"Discovered tool: {tool_name}")
 
         except Exception as e:
             self.logger.error(f"Failed to discover tools: {e}")

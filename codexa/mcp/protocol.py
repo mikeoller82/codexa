@@ -126,14 +126,21 @@ class MCPProtocol:
     TIMEOUT_ERROR = -32002
     
     @staticmethod
-    def create_request(method: str, params: Optional[Dict[str, Any]] = None, 
+    def create_request(method: str, params: Optional[Dict[str, Any]] = None,
                       request_id: Optional[str] = None) -> MCPMessage:
         """Create a JSON-RPC 2.0 request message."""
-        return MCPMessage(
-            method=method,
-            params=params,
-            id=request_id or str(uuid.uuid4())
-        )
+        # Handle None params - don't include params field if None
+        if params is None:
+            return MCPMessage(
+                method=method,
+                id=request_id or str(uuid.uuid4())
+            )
+        else:
+            return MCPMessage(
+                method=method,
+                params=params,
+                id=request_id or str(uuid.uuid4())
+            )
     
     @staticmethod
     def create_response(request_id: str, result: Any) -> MCPMessage:
