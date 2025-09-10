@@ -86,10 +86,11 @@ class WriteFileTool(Tool):
             content = context.get_state("content")
             
             # Try to extract from request if not in context
-            if not file_path or not content:
+            if not file_path or content is None:
                 extracted = self._extract_file_and_content(context.user_request)
                 file_path = file_path or extracted.get("file_path")
-                content = content or extracted.get("content")
+                if content is None:
+                    content = extracted.get("content", "")
             
             if not file_path:
                 return ToolResult.error_result(
@@ -97,11 +98,9 @@ class WriteFileTool(Tool):
                     tool_name=self.name
                 )
             
-            if not content:
-                return ToolResult.error_result(
-                    error="No content specified",
-                    tool_name=self.name
-                )
+            # Ensure content is a string (empty string is valid for empty file creation)
+            if content is None:
+                content = ""
             
             # Try MCP filesystem first
             if await self._write_with_mcp(file_path, content, context):
@@ -187,7 +186,21 @@ class WriteFileTool(Tool):
                 result["content"] = result["content"].strip().strip('"\'')
                 return result
         
-        # Pattern 3: Just file creation - "create file.txt", "make README.md"
+        # Pattern 3: UI/Interface specific patterns - "create ui/ux interface", "create dashboard" (prioritized)
+        ui_patterns = [
+            r'(?:create|make|build)\s+(?:a\s+)?(?:ui/ux|ui|ux)\s+(interface|dashboard|component|view)(?:\s+for\s+[\w-]+)?',
+            r'(?:create|make|build)\s+(?:a\s+)?(interface|dashboard|component|view)(?:\s+for\s+[\w-]+)?',
+        ]
+        
+        for pattern in ui_patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                component_type = match.group(1)
+                result["file_path"] = f"{component_type}.html"  # Default to HTML for UI components
+                result["content"] = ""  # Empty content for simple file creation
+                return result
+                
+        # Pattern 4: Just file creation - "create file.txt", "make README.md"
         file_creation_patterns = [
             r'(?:create|make|write)\s+(?:a\s+)?(?:new\s+)?(?:file\s+)?(?:called\s+)?([^\s]+\.[a-zA-Z0-9]+)',
             r'(?:create|make|write)\s+(?:a\s+)?([A-Z][A-Z0-9]*(?:\.[a-zA-Z0-9]+)?)',  # README, CHANGELOG, etc.
@@ -200,7 +213,7 @@ class WriteFileTool(Tool):
                 result["content"] = ""  # Empty content for simple file creation
                 return result
         
-        # Pattern 4: Generic file path extraction  
+        # Pattern 5: Generic file path extraction  
         file_pattern = r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'
         file_matches = re.findall(file_pattern, request)
         if file_matches:
