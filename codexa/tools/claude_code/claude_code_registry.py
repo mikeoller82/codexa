@@ -250,29 +250,99 @@ class ClaudeCodeRegistry:
                                 context: ToolContext) -> Dict[str, Any]:
         """Extract parameters for Read tool."""
         # Look for file path
-        file_path = ""
+        file_path = None
         
-        # Look for quoted file paths
+        # Look for quoted file paths first
         quote_match = re.search(r'["\']([^"\']+)["\']', request)
         if quote_match:
-            file_path = quote_match.group(1)
-        else:
-            # Look for file extensions
-            file_match = re.search(r'([^\\s]+\\.[a-zA-Z0-9]+)', request)
+            potential_path = quote_match.group(1)
+            # Validate it looks like a reasonable file path
+            if '.' in potential_path and ('/' in potential_path or '\\' in potential_path or not ' ' in potential_path):
+                file_path = potential_path
+        
+        # If no quoted path found, look for file extensions with paths
+        if not file_path:
+            # Match patterns like /path/to/file.ext or file.ext
+            file_match = re.search(r'([^\s]+\.[a-zA-Z0-9]+)', request)
             if file_match:
-                file_path = file_match.group(1)
+                potential_path = file_match.group(1)
+                # Basic validation - avoid matching things like "read file.txt from disk" 
+                if not re.match(r'^[a-z]+\.[a-z]+$', potential_path):  # Avoid "file.ext" patterns
+                    file_path = potential_path
+        
+        # If still no path, try to extract from common phrases
+        if not file_path:
+            # Look for patterns like "read FILENAME" or "show FILENAME"
+            filename_patterns = [
+                r'(?:read|show|display|view|cat)\s+([^\s]+\.[a-zA-Z0-9]+)',
+                r'(?:file|path):\s*([^\s]+\.[a-zA-Z0-9]+)',
+                r'([./][^\s]*\.[a-zA-Z0-9]+)'  # Paths starting with . or /
+            ]
+            
+            for pattern in filename_patterns:
+                match = re.search(pattern, request, re.IGNORECASE)
+                if match:
+                    file_path = match.group(1)
+                    break
         
         return {
-            "file_path": file_path
+            "file_path": file_path  # Return None if not found, instead of empty string
         }
     
     def _extract_write_parameters(self, request: str, schema: Dict[str, Any], 
                                  context: ToolContext) -> Dict[str, Any]:
         """Extract parameters for Write tool."""
-        # This typically requires more context or explicit parameters
+        file_path = None
+        content = None
+        
+        # Look for patterns like "write 'content' to file.txt" or "create file.txt with content"
+        write_patterns = [
+            r'(?:write|create|save)\s+["\']([^"\']+)["\']\s+(?:to|in)\s+([^\s]+\.[a-zA-Z0-9]+)',
+            r'(?:create|write)\s+([^\s]+\.[a-zA-Z0-9]+)\s+(?:with|containing)\s+["\']([^"\']+)["\']',
+            r'(?:write|save)\s+(?:to|file)\s*:?\s*([^\s]+\.[a-zA-Z0-9]+)',
+        ]
+        
+        for pattern in write_patterns:
+            match = re.search(pattern, request, re.IGNORECASE)
+            if match:
+                if len(match.groups()) == 2:
+                    # Pattern with both content and file
+                    if 'to' in pattern:
+                        content, file_path = match.groups()
+                    else:
+                        file_path, content = match.groups()
+                else:
+                    # Pattern with just file path
+                    file_path = match.group(1)
+                break
+        
+        # If no specific pattern matched, look for file extension separately
+        if not file_path:
+            file_match = re.search(r'([^\s]+\.[a-zA-Z0-9]+)', request)
+            if file_match:
+                potential_path = file_match.group(1)
+                # Basic validation to ensure it's likely a file path
+                if not re.match(r'^[a-z]+\.[a-z]+$', potential_path):
+                    file_path = potential_path
+        
+        # Look for quoted content separately if not found yet
+        if not content:
+            # Look for content in quotes or code blocks
+            content_patterns = [
+                r'["\']([^"\']{10,})["\']',  # Long quoted strings
+                r'```([^`]+)```',  # Code blocks
+                r'content[:\s]+["\']([^"\']+)["\']'  # Explicit content: "..."
+            ]
+            
+            for pattern in content_patterns:
+                match = re.search(pattern, request, re.DOTALL)
+                if match:
+                    content = match.group(1).strip()
+                    break
+        
         return {
-            "file_path": "",
-            "content": ""
+            "file_path": file_path,  # Return None if not found
+            "content": content       # Return None if not found
         }
     
     def _extract_edit_parameters(self, request: str, schema: Dict[str, Any], 

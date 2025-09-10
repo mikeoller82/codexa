@@ -11,6 +11,23 @@ from ..base.tool_interface import Tool, ToolContext, ToolResult
 class WriteTool(Tool):
     """Writes a file to the local filesystem."""
     
+    # Claude Code schema compatibility
+    CLAUDE_CODE_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The absolute path to the file to write (must be absolute, not relative)"
+            },
+            "content": {
+                "type": "string",
+                "description": "The content to write to the file"
+            }
+        },
+        "required": ["file_path", "content"],
+        "additionalProperties": False
+    }
+    
     @property
     def name(self) -> str:
         return "Write"
@@ -137,19 +154,3 @@ class WriteTool(Tool):
         return str(Path(file_path).resolve()) in read_files
 
 
-# Claude Code schema compatibility
-CLAUDE_CODE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "file_path": {
-            "type": "string",
-            "description": "The absolute path to the file to write (must be absolute, not relative)"
-        },
-        "content": {
-            "type": "string",
-            "description": "The content to write to the file"
-        }
-    },
-    "required": ["file_path", "content"],
-    "additionalProperties": False
-}

@@ -257,7 +257,7 @@ class UnifiedValidator:
     def validate_tool_parameters(self, tool_name: str, parameters: Dict[str, Any],
                                 context: Optional[ToolContext] = None) -> ValidationResult:
         """Validate parameters for a specific tool."""
-        result = ValidationResult()
+        result = ValidationResult(valid=True)
         
         if tool_name not in self.tool_validators:
             # No specific validators - perform basic validation
@@ -310,7 +310,8 @@ class UnifiedValidator:
     
     def _basic_validation(self, parameters: Dict[str, Any]) -> ValidationResult:
         """Basic validation for tools without specific validators."""
-        result = ValidationResult(valid=True, parameters=parameters.copy())
+        result = ValidationResult(valid=True)
+        result.parameters = parameters.copy()
         
         for key, value in parameters.items():
             if value is None:

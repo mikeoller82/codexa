@@ -11,6 +11,27 @@ from ..base.tool_interface import Tool, ToolContext, ToolResult
 class ReadTool(Tool):
     """Reads a file from the local filesystem."""
     
+    # Claude Code schema compatibility
+    CLAUDE_CODE_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The absolute path to the file to read"
+            },
+            "offset": {
+                "type": "number",
+                "description": "The line number to start reading from"
+            },
+            "limit": {
+                "type": "number",
+                "description": "The number of lines to read"
+            }
+        },
+        "required": ["file_path"],
+        "additionalProperties": False
+    }
+    
     @property
     def name(self) -> str:
         return "Read"
@@ -246,24 +267,3 @@ class ReadTool(Tool):
         else:
             return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
 
-
-# Claude Code schema compatibility
-CLAUDE_CODE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "file_path": {
-            "type": "string",
-            "description": "The absolute path to the file to read"
-        },
-        "offset": {
-            "type": "number",
-            "description": "The line number to start reading from"
-        },
-        "limit": {
-            "type": "number",
-            "description": "The number of lines to read"
-        }
-    },
-    "required": ["file_path"],
-    "additionalProperties": False
-}

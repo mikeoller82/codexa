@@ -313,7 +313,9 @@ class ToolManager:
                     validation = claude_code_registry.validate_parameters(tool_name, extracted_params)
                     if validation["valid"]:
                         for key, value in validation["parameters"].items():
-                            context.update_state(key, value)
+                            # Only set non-None values to avoid overriding defaults
+                            if value is not None:
+                                context.update_state(key, value)
                         
                         # Log successful validation with security status
                         security_status = "with security validation" if validation.get("security_validated") else "legacy validation"
@@ -668,9 +670,23 @@ class ToolManager:
             # Check if tool has required context
             if hasattr(tool, 'required_context') and tool.required_context:
                 for required_key in tool.required_context:
-                    if not hasattr(context, required_key) or getattr(context, required_key) is None:
-                        # For tools that require specific context, be more strict
-                        if required_key in ['file_path', 'pattern', 'directory_path']:
+                    # Check if the key exists as an attribute (legacy support)
+                    if hasattr(context, required_key):
+                        attr_value = getattr(context, required_key)
+                        if attr_value is None:
+                            # For tools that require specific context, be more strict
+                            if required_key in ['file_path', 'pattern', 'directory_path']:
+                                return False
+                    
+                    # Enhanced validation: Check actual parameter values in shared_state
+                    param_value = context.get_state(required_key)
+                    if param_value is None:
+                        # For tools that require specific parameters, be more strict
+                        if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
+                            return False
+                    elif isinstance(param_value, str) and not param_value.strip():
+                        # Empty string parameters are also invalid for critical tools
+                        if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
                             return False
             
             # Check if tool has validate_context method
