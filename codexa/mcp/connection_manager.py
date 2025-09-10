@@ -171,8 +171,19 @@ class MCPConnection:
                 
                 # Return the result from the MCPMessage, handling errors
                 if response.error:
-                    raise MCPError(f"Server error: {response.error}")
-                
+                    error_code = response.error.get("code", -1)
+                    error_message = response.error.get("message", "Unknown error")
+
+                    # Provide more specific error messages for common MCP errors
+                    if error_code == -32602:  # INVALID_PARAMS
+                        raise MCPError(f"Invalid parameters for {method}: {error_message}", error_code)
+                    elif error_code == -32601:  # METHOD_NOT_FOUND
+                        raise MCPError(f"Method {method} not found on server {self.config.name}", error_code)
+                    elif error_code == -32600:  # INVALID_REQUEST
+                        raise MCPError(f"Invalid request to server {self.config.name}: {error_message}", error_code)
+                    else:
+                        raise MCPError(f"Server error: {error_message}", error_code)
+
                 return response.result
                 
             except asyncio.TimeoutError:

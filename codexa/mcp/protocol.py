@@ -20,7 +20,7 @@ class MCPMessageType(Enum):
 @dataclass
 class MCPMessage:
     """MCP message wrapper for JSON-RPC 2.0 protocol."""
-    
+
     jsonrpc: str = "2.0"
     id: Optional[str] = None
     method: Optional[str] = None
@@ -208,7 +208,7 @@ class MCPProtocol:
             
         return parsed
     
-    @staticmethod 
+    @staticmethod
     def create_initialize_request(client_info: Dict[str, Any]) -> MCPMessage:
         """Create MCP initialization request."""
         params = {
@@ -218,10 +218,11 @@ class MCPProtocol:
                 "roots": {
                     "listChanged": True
                 },
-                "sampling": {}
+                "sampling": {},
+                "tools": {}  # Add tools capability
             }
         }
-        
+
         return MCPProtocol.create_request("initialize", params)
     
     @staticmethod
