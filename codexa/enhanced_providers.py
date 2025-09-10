@@ -172,38 +172,46 @@ class EnhancedAIProvider(AIProvider):
         if self.is_available():
             self.metrics.uptime_start = datetime.now()
     
-    async def ask(self, prompt: str, history: Optional[List[Dict]] = None,
-                 context: Optional[str] = None, model: Optional[str] = None) -> str:
+    def ask(self, prompt: str, history: Optional[List[Dict]] = None,
+             context: Optional[str] = None, model: Optional[str] = None) -> str:
         """Enhanced ask method with metrics tracking."""
         start_time = datetime.now()
-        
+
         try:
             # Use specific model if provided
             if model and hasattr(self.base_provider, 'model'):
                 original_model = self.base_provider.model
                 self.base_provider.model = model
-            
+
             # Call base provider (synchronous call)
             response = self.base_provider.ask(prompt, history, context)
-            
+
             # Restore original model
             if model and hasattr(self.base_provider, 'model'):
                 self.base_provider.model = original_model
-            
+
             # Update metrics
             response_time = (datetime.now() - start_time).total_seconds()
             self.metrics.update_request(True, response_time)
-            
+
             self.logger.debug(f"Request completed in {response_time:.2f}s")
             return response
-            
+
         except Exception as e:
             # Update metrics for failure
             response_time = (datetime.now() - start_time).total_seconds()
             self.metrics.update_request(False, response_time)
-            
+
             self.logger.error(f"Request failed after {response_time:.2f}s: {e}")
             raise
+
+    async def ask_async(self, prompt: str, history: Optional[List[Dict]] = None,
+                       context: Optional[str] = None, model: Optional[str] = None) -> str:
+        """Async version of ask method for compatibility with async interfaces."""
+        # Since the base provider's ask method is synchronous, we run it in a thread pool
+        import asyncio
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.ask, prompt, history, context, model)
     
     def is_available(self) -> bool:
         """Check if provider is available."""

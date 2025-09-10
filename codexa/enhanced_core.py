@@ -334,6 +334,9 @@ class EnhancedCodexaAgent:
                 provider=self.provider
             )
 
+            # Extract and set file paths from request for tools that need them
+            self._extract_and_set_file_paths(request, context)
+
             # Show real-time tool discovery and planning
             console.print("[dim]🔍 Analyzing request and selecting tools...[/dim]")
 
@@ -425,6 +428,29 @@ class EnhancedCodexaAgent:
         except Exception as e:
             console.print(f"[red]Request processing failed: {e}[/red]")
             self.logger.error(f"Request processing error: {e}")
+
+    def _extract_and_set_file_paths(self, request: str, context: ToolContext):
+        """Extract file paths from user request and set them in context for tools that need them."""
+        import re
+
+        # Look for file paths with extensions
+        file_pattern = r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'
+        matches = re.findall(file_pattern, request)
+
+        if matches:
+            # Set the first file path found
+            context.update_state("file_path", matches[0])
+            self.logger.debug(f"Extracted file_path from request: {matches[0]}")
+
+        # Also look for quoted paths
+        quoted_pattern = r'["\']([^"\']+)["\']'
+        matches = re.findall(quoted_pattern, request)
+
+        for match in matches:
+            if '/' in match or '\\' in match or '.' in match:
+                context.update_state("file_path", match)
+                self.logger.debug(f"Extracted quoted file_path from request: {match}")
+                break
 
     async def _process_with_ai_fallback(self, request: str) -> Optional[str]:
         """Fallback to direct AI processing when tool system fails."""
