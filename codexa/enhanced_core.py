@@ -167,10 +167,19 @@ class EnhancedCodexaAgent:
         """Main interaction loop using tool-based request processing."""
         console.print("")  # Just a blank line, no repeated ready message
         
-        # Check for resumable agentic context on startup
-        if self.session_memory and self.session_memory.current_state.value in ["agentic_active", "agentic_paused"]:
-            console.print("\n[yellow]🔄 Resuming agentic task context...[/yellow]")
-            console.print(f"[dim]{self.session_memory.get_agentic_summary()}[/dim]\n")
+        # Load existing session if available
+        if self.session_memory:
+            try:
+                # Try to load the most recent session
+                latest_session = self._find_latest_session()
+                if latest_session and self.session_memory.load_session(latest_session):
+                    if self.session_memory.current_state.value in ["agentic_active", "agentic_paused"]:
+                        console.print("\n[yellow]🔄 Resuming agentic task context...[/yellow]")
+                        console.print(f"[dim]{self.session_memory.get_agentic_summary()}[/dim]\n")
+                    else:
+                        console.print(f"[dim]Session {latest_session} loaded[/dim]")
+            except Exception as e:
+                self.logger.debug(f"Failed to load previous session: {e}")
         
         while True:
             try:
@@ -203,7 +212,7 @@ class EnhancedCodexaAgent:
             # Add conversation entry
             self.session_memory.add_conversation_entry(request, "", "processing")
         
-        # Determine processing mode
+        # Determine processing mode - prioritize agentic mode for better task completion
         should_use_agentic = (
             is_agentic_continuation or 
             self._should_use_agentic_mode(request) or
@@ -216,34 +225,49 @@ class EnhancedCodexaAgent:
             await self._process_request_direct(request)
     
     def _should_use_agentic_mode(self, request: str) -> bool:
-        """Determine if request should use agentic loop mode."""
-        # High-priority agentic keywords that trigger agentic mode by themselves
-        high_priority_keywords = [
-            'systematically', 'comprehensive', 'analyze', 'figure out', 
-            'investigate', 'step by step', 'think through'
-        ]
-        
-        # Additional agentic indicators
-        agentic_keywords = [
-            'autonomously', 'iteratively', 'work through', 'solve', 'debug',
-            'complex', 'thorough', 'understand', 'improve', 'optimize'
-        ]
-        
+        """Determine if request should use agentic loop mode - more aggressive detection."""
         request_lower = request.lower()
         
-        # Check for explicit agentic commands
+        # Explicit agentic commands
         if any(cmd in request_lower for cmd in ['/agentic', '/loop', '/autonomous', '/think']):
             return True
         
-        # Check for high-priority keywords (single keyword triggers agentic mode)
+        # High-priority agentic keywords that trigger agentic mode by themselves
+        high_priority_keywords = [
+            'systematically', 'comprehensive', 'analyze', 'figure out', 
+            'investigate', 'step by step', 'think through', 'solve',
+            'implement', 'create', 'build', 'make', 'write', 'develop'
+        ]
+        
         if any(keyword in request_lower for keyword in high_priority_keywords):
             return True
-            
-        # Check for agentic keywords (need 2 or more)
+        
+        # Programming/development tasks are typically complex enough for agentic mode
+        programming_keywords = [
+            'function', 'class', 'method', 'variable', 'code', 'script',
+            'program', 'application', 'algorithm', 'calculator', 'parser',
+            'api', 'endpoint', 'server', 'client', 'database', 'file'
+        ]
+        
+        programming_count = sum(1 for keyword in programming_keywords if keyword in request_lower)
+        if programming_count >= 1:
+            return True
+        
+        # Additional agentic indicators
+        agentic_keywords = [
+            'autonomously', 'iteratively', 'work through', 'debug',
+            'complex', 'thorough', 'understand', 'improve', 'optimize',
+            'design', 'architecture', 'structure', 'organize', 'refactor'
+        ]
+        
         keyword_count = sum(1 for keyword in agentic_keywords if keyword in request_lower)
         
-        # Use agentic mode for complex requests or multiple agentic indicators
-        return keyword_count >= 2 or len(request) > 100
+        # Use agentic mode for multiple indicators, longer requests, or any programming task
+        return (
+            keyword_count >= 1 or  # Even single agentic indicator now triggers
+            len(request) > 80 or   # Shorter threshold for complex requests  
+            any(word in request_lower for word in ['how do i', 'how can i', 'help me'])  # Help requests
+        )
     
     async def _process_request_agentic(self, request: str, is_continuation: bool = False):
         """Process request using agentic loop with verbose feedback."""
@@ -774,6 +798,27 @@ Tool-based Codexa adapts its capabilities based on available tools and project s
         
         self.logger.info("Session cleanup complete")
 
+    def _find_latest_session(self) -> Optional[str]:
+        """Find the most recent session ID."""
+        try:
+            if not self.session_memory.session_dir.exists():
+                return None
+            
+            session_files = list(self.session_memory.session_dir.glob("session_*.json"))
+            if not session_files:
+                return None
+            
+            # Sort by modification time, most recent first
+            latest_file = max(session_files, key=lambda f: f.stat().st_mtime)
+            
+            # Extract session ID from filename
+            session_id = latest_file.stem.replace("session_", "")
+            return session_id
+            
+        except Exception as e:
+            self.logger.debug(f"Failed to find latest session: {e}")
+            return None
+    
     async def shutdown(self):
         """Graceful shutdown of tool-based agent."""
         self.logger.info("Shutting down tool-based Codexa agent...")

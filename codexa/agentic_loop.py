@@ -142,7 +142,7 @@ class CodexaAgenticLoop:
 
     async def run_agentic_loop(self, task: str) -> AgenticTaskResult:
         """
-        Run the main agentic loop until task completion or max iterations.
+        Run the main agentic loop until task completion.
         
         Args:
             task: The task description to accomplish
@@ -170,6 +170,9 @@ class CodexaAgenticLoop:
         
         context = task
         status = LoopStatus.THINKING
+        task_completed = False
+        consecutive_failures = 0
+        max_consecutive_failures = 3
         
         for i in range(self.max_iterations):
             iteration_start = time.time()
@@ -219,9 +222,11 @@ class CodexaAgenticLoop:
                 if evaluation_result["success"]:
                     completed_steps = [thinking_result["plan"]]
                     pending_steps = []
+                    consecutive_failures = 0  # Reset failure count on success
                 else:
                     completed_steps = []
                     pending_steps = [thinking_result["plan"]]
+                    consecutive_failures += 1
                 
                 self.session_memory.update_agentic_context(
                     iteration_count=i + 1,
@@ -236,32 +241,71 @@ class CodexaAgenticLoop:
             
             # Step 4: Check for completion
             if evaluation_result["success"]:
-                status = LoopStatus.SUCCESS
+                # Additional check: is the overall task truly complete?
+                task_check = await self._check_overall_task_completion(task, execution_result["result"])
                 
-                # Mark task as completed in session memory
-                if self.session_memory and SessionMemory:
-                    self.session_memory.complete_agentic_context(execution_result["result"])
-                
-                if self.verbose:
-                    self._display_success(i + 1)
-                break
+                if task_check["complete"]:
+                    status = LoopStatus.SUCCESS
+                    task_completed = True
+                    
+                    # Mark task as completed in session memory
+                    if self.session_memory and SessionMemory:
+                        self.session_memory.complete_agentic_context(execution_result["result"])
+                    
+                    if self.verbose:
+                        self._display_success(i + 1)
+                    break
+                else:
+                    # Partial success - continue with refined objective
+                    if self.verbose:
+                        self.console.print(f"[yellow]✓ Step completed, but overall task needs more work: {task_check['feedback']}[/yellow]")
+                    context = f"{task} | Progress so far: {execution_result['result']} | Next: {task_check['feedback']}"
             else:
-                # Step 5: Refine context for next iteration
-                refined_context = await self._refine_task(context, evaluation_result["feedback"])
-                context = refined_context
+                # Step 5: Handle failure and refine context
+                if consecutive_failures >= max_consecutive_failures:
+                    if self.verbose:
+                        self.console.print(f"[red]⚠️ {consecutive_failures} consecutive failures. Trying different approach...[/red]")
+                    # Reset approach with simplified objective
+                    context = await self._simplify_task_approach(task, evaluation_result["feedback"])
+                    consecutive_failures = 0  # Reset after changing approach
+                else:
+                    refined_context = await self._refine_task(context, evaluation_result["feedback"])
+                    context = refined_context
+                    
                 if self.verbose:
-                    self._display_refinement(refined_context)
+                    self._display_refinement(context)
             
             # Brief pause to make the loop visible
             if self.verbose:
                 await asyncio.sleep(0.5)
         
-        if status != LoopStatus.SUCCESS:
-            status = LoopStatus.MAX_ITERATIONS
-            if self.verbose:
-                self._display_max_iterations_reached()
+        # Determine final status
+        if not task_completed:
+            if i >= self.max_iterations - 1:
+                status = LoopStatus.MAX_ITERATIONS
+                if self.verbose:
+                    self._display_max_iterations_reached()
+            else:
+                status = LoopStatus.FAILURE
         
         total_duration = time.time() - self.start_time
+        
+        # Get final result - prefer last successful result or last attempt
+        final_result = None
+        if status == LoopStatus.SUCCESS:
+            final_result = execution_result["result"]
+        else:
+            # Look for the best result from all iterations
+            best_iteration = None
+            for iteration in self.iterations:
+                if iteration.success:
+                    best_iteration = iteration
+                    break
+            
+            if best_iteration:
+                final_result = best_iteration.execution_result
+            elif self.iterations:
+                final_result = self.iterations[-1].execution_result
         
         # Create final result
         result = AgenticTaskResult(
@@ -269,8 +313,8 @@ class CodexaAgenticLoop:
             status=status,
             iterations=self.iterations,
             total_duration=total_duration,
-            final_result=execution_result["result"] if status == LoopStatus.SUCCESS else None,
-            success=status == LoopStatus.SUCCESS
+            final_result=final_result,
+            success=task_completed
         )
         
         if self.verbose:
@@ -1034,6 +1078,120 @@ Consider:
             "evaluation_method": "heuristic"
         }
 
+    async def _check_overall_task_completion(self, original_task: str, latest_result: str) -> Dict[str, Any]:
+        """
+        Check if the overall task is truly complete, not just the current step.
+        
+        Args:
+            original_task: The original task description
+            latest_result: Latest execution result
+            
+        Returns:
+            Dictionary with completion status and feedback
+        """
+        try:
+            if self.provider and hasattr(self.provider, 'ask'):
+                check_prompt = f"""You are Codexa Agent evaluating overall task completion.
+
+ORIGINAL TASK: {original_task}
+
+LATEST RESULT: {latest_result}
+
+Is the ORIGINAL TASK completely finished based on this latest result? Consider:
+- Does this result fully satisfy what the original task asked for?
+- Are there any remaining parts of the original task that still need work?
+- Would a user consider this task "completely done"?
+
+Respond in this format:
+COMPLETE: true/false
+FEEDBACK: [If not complete, what specifically still needs to be done? If complete, confirm what was accomplished]"""
+                
+                response = self.provider.ask(check_prompt)
+                
+                complete = False
+                feedback = ""
+                
+                lines = response.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('COMPLETE:'):
+                        complete_text = line.split(':', 1)[1].strip().lower()
+                        complete = complete_text in ['true', 'yes', '1']
+                    elif line.startswith('FEEDBACK:'):
+                        feedback = line.split(':', 1)[1].strip()
+                
+                return {
+                    "complete": complete,
+                    "feedback": feedback or ("Task completed successfully" if complete else "Task needs more work")
+                }
+            
+            # Fallback heuristic check
+            return self._heuristic_task_completion_check(original_task, latest_result)
+            
+        except Exception as e:
+            self.logger.error(f"Task completion check failed: {e}")
+            return {"complete": False, "feedback": f"Could not verify completion: {e}"}
+    
+    def _heuristic_task_completion_check(self, original_task: str, latest_result: str) -> Dict[str, Any]:
+        """Fallback heuristic check for task completion."""
+        task_lower = original_task.lower()
+        result_lower = latest_result.lower()
+        
+        # Check for completion indicators
+        if "create" in task_lower:
+            if "created" in result_lower or "generated" in result_lower or "written" in result_lower:
+                return {"complete": True, "feedback": "Creation task appears complete"}
+        
+        if "implement" in task_lower:
+            if "implemented" in result_lower or "completed" in result_lower:
+                return {"complete": True, "feedback": "Implementation task appears complete"}
+        
+        # Look for error indicators
+        if any(word in result_lower for word in ["error", "failed", "cannot", "unable"]):
+            return {"complete": False, "feedback": "Errors detected, task needs more work"}
+        
+        # Default conservative approach
+        return {"complete": False, "feedback": "Cannot verify completion, continue working"}
+    
+    async def _simplify_task_approach(self, original_task: str, feedback: str) -> str:
+        """
+        Simplify the task approach after consecutive failures.
+        
+        Args:
+            original_task: Original task description
+            feedback: Latest feedback
+            
+        Returns:
+            Simplified task approach
+        """
+        try:
+            if self.provider and hasattr(self.provider, 'ask'):
+                simplify_prompt = f"""You are Codexa Agent trying to simplify an approach after repeated failures.
+
+ORIGINAL TASK: {original_task}
+
+LATEST FEEDBACK: {feedback}
+
+After several failed attempts, suggest a simpler, more basic approach to accomplish this task. 
+Focus on the most essential part first, break it into the smallest possible step.
+
+SIMPLER APPROACH: [Describe a much simpler first step that's almost certain to work]"""
+                
+                response = self.provider.ask(simplify_prompt)
+                if "SIMPLER APPROACH:" in response:
+                    simplified = response.split("SIMPLER APPROACH:")[1].strip()
+                else:
+                    simplified = response.strip()
+                
+                return f"SIMPLIFIED: {simplified} (Original: {original_task})"
+            
+            # Fallback simplification
+            return f"Break down into simpler steps: {original_task} | Previous issues: {feedback}"
+            
+        except Exception as e:
+            self.logger.error(f"Task simplification failed: {e}")
+            return f"Try basic approach: {original_task}"
+
     async def _refine_task(self, task: str, feedback: str) -> str:
         """
         Refine the task context based on feedback.
@@ -1046,7 +1204,33 @@ Consider:
             Refined task context
         """
         try:
-            # Simple refinement - could be enhanced with AI
+            # Enhanced refinement with AI if available
+            if self.provider and hasattr(self.provider, 'ask'):
+                refine_prompt = f"""You are Codexa Agent refining a task approach based on feedback.
+
+CURRENT TASK CONTEXT: {task}
+
+FEEDBACK FROM LAST ATTEMPT: {feedback}
+
+ITERATION: {len(self.iterations) + 1}
+
+Please refine the task approach based on this feedback. Be more specific and actionable.
+
+REFINED APPROACH: [Your refined approach that addresses the feedback]"""
+                
+                try:
+                    response = self.provider.ask(refine_prompt)
+                    if "REFINED APPROACH:" in response:
+                        refined = response.split("REFINED APPROACH:")[1].strip()
+                    else:
+                        refined = response.strip()
+                    
+                    return refined if refined else task
+                except Exception:
+                    # Fall through to basic refinement
+                    pass
+            
+            # Basic refinement fallback
             refined = f"{task} | Previous feedback: {feedback}"
             
             # Add iteration-specific guidance
