@@ -422,32 +422,11 @@ class SerenaClient:
     
     async def _discover_tools(self):
         """Discover available tools from Serena server."""
-        try:
-            # Get tools list - omit params entirely for basic tools/list request
-            # This follows JSON-RPC 2.0 where params are optional
-            result = await self.connection.send_request("tools/list", None)
-
-            if isinstance(result, dict) and "tools" in result:
-                tools = result["tools"]
-                self.logger.debug(f"Successfully discovered {len(tools)} tools from Serena")
-
-                for tool in tools:
-                    if isinstance(tool, dict) and "name" in tool:
-                        tool_name = tool["name"]
-                        self.available_tools[tool_name] = tool
-                        self.logger.debug(f"Registered Serena tool: {tool_name}")
-                
-                self.logger.info(f"Serena client connected with {len(self.available_tools)} tools")
-                return  # Success - don't continue to fallback
-            else:
-                self.logger.warning(f"Unexpected response format from tools/list: {result}")
-                raise MCPError("Invalid tools/list response format", -32603)
-
-        except Exception as e:
-            self.logger.warning(f"Failed to discover tools via MCP protocol: {e}")
-            # Continue with known tools even if discovery fails
-            self._add_default_tools()
-            self.logger.info(f"Using {len(self.available_tools)} default tools as fallback")
+        # WORKAROUND: Skip MCP discovery due to known Serena validation issue
+        # Use comprehensive default tool set instead
+        self.logger.info("Using comprehensive Serena tool set (MCP discovery workaround)")
+        self._add_comprehensive_serena_tools()
+        self.logger.info(f"Serena client connected with {len(self.available_tools)} tools")
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific tool."""
@@ -474,6 +453,266 @@ class SerenaClient:
         """Check if client is connected to Serena server."""
         return self.connection.state == ConnectionState.CONNECTED
     
+    def _add_comprehensive_serena_tools(self):
+        """Add comprehensive Serena tool set based on official documentation."""
+        # Core Serena tools from official documentation (uv run serena tools list)
+        comprehensive_tools = {
+            "activate_project": {
+                "name": "activate_project",
+                "description": "Activates a project by name.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"project": {"type": "string"}},
+                    "required": ["project"]
+                }
+            },
+            "check_onboarding_performed": {
+                "name": "check_onboarding_performed", 
+                "description": "Checks whether project onboarding was already performed.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "create_text_file": {
+                "name": "create_text_file",
+                "description": "Creates/overwrites a file in the project directory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "relative_path": {"type": "string"},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["relative_path", "body"]
+                }
+            },
+            "delete_memory": {
+                "name": "delete_memory",
+                "description": "Deletes a memory from Serena's project-specific memory store.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"memory_file_name": {"type": "string"}},
+                    "required": ["memory_file_name"]
+                }
+            },
+            "execute_shell_command": {
+                "name": "execute_shell_command", 
+                "description": "Executes a shell command.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"command": {"type": "string"}},
+                    "required": ["command"]
+                }
+            },
+            "find_file": {
+                "name": "find_file",
+                "description": "Finds files in the given relative paths.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "file_mask": {"type": "string"},
+                        "relative_path": {"type": "string"}
+                    },
+                    "required": ["file_mask", "relative_path"]
+                }
+            },
+            "find_referencing_symbols": {
+                "name": "find_referencing_symbols",
+                "description": "Finds symbols that reference the symbol at the given location (optionally filtered by type).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name_path": {"type": "string"},
+                        "relative_path": {"type": "string"}
+                    },
+                    "required": ["name_path", "relative_path"]
+                }
+            },
+            "find_symbol": {
+                "name": "find_symbol",
+                "description": "Performs a global (or local) search for symbols with/containing a given name/substring (optionally filtered by type).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name_path": {"type": "string"},
+                        "depth": {"type": "integer", "default": 0},
+                        "relative_path": {"type": "string", "default": ""},
+                        "include_body": {"type": "boolean", "default": False}
+                    },
+                    "required": ["name_path"]
+                }
+            },
+            "get_symbols_overview": {
+                "name": "get_symbols_overview",
+                "description": "Gets an overview of the top-level symbols defined in a given file.",
+                "inputSchema": {
+                    "type": "object", 
+                    "properties": {"relative_path": {"type": "string"}},
+                    "required": ["relative_path"]
+                }
+            },
+            "insert_after_symbol": {
+                "name": "insert_after_symbol",
+                "description": "Inserts content after the end of the definition of a given symbol.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name_path": {"type": "string"},
+                        "relative_path": {"type": "string"},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["name_path", "relative_path", "body"]
+                }
+            },
+            "insert_before_symbol": {
+                "name": "insert_before_symbol",
+                "description": "Inserts content before the beginning of the definition of a given symbol.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name_path": {"type": "string"},
+                        "relative_path": {"type": "string"},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["name_path", "relative_path", "body"]
+                }
+            },
+            "list_dir": {
+                "name": "list_dir",
+                "description": "Lists files and directories in the given directory (optionally with recursion).",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "relative_path": {"type": "string"},
+                        "recursive": {"type": "boolean", "default": False}
+                    },
+                    "required": ["relative_path"]
+                }
+            },
+            "list_memories": {
+                "name": "list_memories",
+                "description": "Lists memories in Serena's project-specific memory store.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "onboarding": {
+                "name": "onboarding",
+                "description": "Performs onboarding (identifying the project structure and essential tasks, e.g. for testing or building).",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "prepare_for_new_conversation": {
+                "name": "prepare_for_new_conversation",
+                "description": "Provides instructions for preparing for a new conversation (in order to continue with the necessary context).",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "read_file": {
+                "name": "read_file",
+                "description": "Reads a file within the project directory.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"relative_path": {"type": "string"}},
+                    "required": ["relative_path"]
+                }
+            },
+            "read_memory": {
+                "name": "read_memory",
+                "description": "Reads the memory with the given name from Serena's project-specific memory store.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {"memory_file_name": {"type": "string"}},
+                    "required": ["memory_file_name"]
+                }
+            },
+            "replace_regex": {
+                "name": "replace_regex",
+                "description": "Replaces content in a file by using regular expressions.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "relative_path": {"type": "string"},
+                        "pattern": {"type": "string"},
+                        "replacement": {"type": "string"}
+                    },
+                    "required": ["relative_path", "pattern", "replacement"]
+                }
+            },
+            "replace_symbol_body": {
+                "name": "replace_symbol_body", 
+                "description": "Replaces the full definition of a symbol.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "name_path": {"type": "string"},
+                        "relative_path": {"type": "string"},
+                        "body": {"type": "string"}
+                    },
+                    "required": ["name_path", "relative_path", "body"]
+                }
+            },
+            "search_for_pattern": {
+                "name": "search_for_pattern",
+                "description": "Performs a search for a pattern in the project.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "substring_pattern": {"type": "string"},
+                        "relative_path": {"type": "string", "default": ""}
+                    },
+                    "required": ["substring_pattern"]
+                }
+            },
+            "think_about_collected_information": {
+                "name": "think_about_collected_information",
+                "description": "Thinking tool for pondering the completeness of collected information.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "think_about_task_adherence": {
+                "name": "think_about_task_adherence",
+                "description": "Thinking tool for determining whether the agent is still on track with the current task.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "think_about_whether_you_are_done": {
+                "name": "think_about_whether_you_are_done",
+                "description": "Thinking tool for determining whether the task is truly completed.",
+                "inputSchema": {"type": "object", "properties": {}}
+            },
+            "write_memory": {
+                "name": "write_memory",
+                "description": "Writes a named memory (for future reference) to Serena's project-specific memory store.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "memory_name": {"type": "string"},
+                        "content": {"type": "string"}
+                    },
+                    "required": ["memory_name", "content"]
+                }
+            }
+        }
+        
+        # Add all comprehensive tools
+        for tool_name, tool_def in comprehensive_tools.items():
+            self.available_tools[tool_name] = tool_def
+        
+        # Update tool categories for better organization
+        self.semantic_tools.update({
+            "find_symbol", "get_symbols_overview", "find_referencing_symbols",
+            "search_for_pattern", "replace_symbol_body", "insert_after_symbol", "insert_before_symbol"
+        })
+        
+        self.file_tools.update({
+            "read_file", "create_text_file", "find_file", "list_dir", "replace_regex"
+        })
+        
+        self.project_tools.update({
+            "activate_project", "onboarding", "check_onboarding_performed", 
+            "prepare_for_new_conversation"
+        })
+        
+        self.execution_tools.update({"execute_shell_command"})
+        
+        self.memory_tools.update({
+            "write_memory", "read_memory", "list_memories", "delete_memory",
+            "think_about_collected_information", "think_about_task_adherence", 
+            "think_about_whether_you_are_done"
+        })
+
     def _add_default_tools(self):
         """Add default known Serena tools when discovery fails."""
         default_tools = {

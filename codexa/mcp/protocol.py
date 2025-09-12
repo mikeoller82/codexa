@@ -55,7 +55,7 @@ class MCPMessage:
             result["id"] = self.id
         if self.method:
             result["method"] = self.method
-        # Only include params if they are provided (JSON-RPC 2.0 compliance)
+        # Include params field for requests (even if empty) for MCP server compatibility
         if self.params is not None:
             result["params"] = self.params
         if self.result is not None:
@@ -226,8 +226,7 @@ class MCPProtocol:
                 "roots": {
                     "listChanged": True
                 },
-                "sampling": {},
-                "tools": {}  # Add tools capability
+                "sampling": {}
             }
         }
 
@@ -236,7 +235,7 @@ class MCPProtocol:
     @staticmethod
     def create_initialized_notification() -> MCPMessage:
         """Create MCP initialized notification."""
-        return MCPProtocol.create_notification("initialized")
+        return MCPProtocol.create_notification("notifications/initialized")
     
     @staticmethod
     def validate_request(message: MCPMessage) -> bool:

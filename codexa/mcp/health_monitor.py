@@ -314,7 +314,7 @@ class MCPHealthMonitor:
             
             # Send a lightweight request (tools/list is supported by all MCP servers)
             await self.connection_manager.send_request(
-                server_name, "tools/list", None
+                server_name, "tools/list", {}
             )
             
             response_time = time.time() - start_time

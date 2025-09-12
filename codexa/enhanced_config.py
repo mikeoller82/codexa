@@ -202,7 +202,7 @@ class EnhancedConfig:
             "mcp_servers": {
                 "serena": {
                     "command": ["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
-                    "args": ["--context", "ide-assistant"],
+                    "args": ["--context", "ide-assistant", "--project", "."],
                     "enabled": False,
                     "timeout": 30,
                     "project_path": None,  # Set to activate a specific project
@@ -311,7 +311,7 @@ class EnhancedConfig:
             "serena": MCPServerConfig(
                 name="serena",
                 command=["uvx", "--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server"],
-                args=["--context", "ide-assistant"],
+                args=["--context", "ide-assistant", "--project", "."],
                 enabled=True,  # Enabled by default for Serena integration
                 capabilities=[
                     "semantic-analysis", "code-editing", "symbol-search", "language-server",
