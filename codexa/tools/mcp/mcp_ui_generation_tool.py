@@ -37,16 +37,12 @@ class MCPUIGenerationTool(Tool):
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""
-        # Only handle if MCP service is available
-        if not context.mcp_service or not context.mcp_service.is_running:
-            return 0.0
-        
         request_lower = request.lower()
         
         # High confidence for explicit UI generation requests
         if any(phrase in request_lower for phrase in [
             "generate component", "create component", "ui component", "generate ui",
-            "create ui", "build component", "component", "interface"
+            "create ui", "build component", "component", "interface", "gui"
         ]):
             return 0.9
         

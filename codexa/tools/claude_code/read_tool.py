@@ -52,19 +52,36 @@ class ReadTool(Tool):
         """Determine if this tool can handle the request."""
         request_lower = request.lower()
         
-        # High confidence for explicit read operations
+        # First, check if we can find a file path in the context or request
+        import re
+        file_path_in_context = context.get_state("file_path")
+        
+        # Look for file paths in the request
+        file_pattern = r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'
+        file_paths_in_request = re.findall(file_pattern, request)
+        
+        # If no file path found anywhere, don't handle the request
+        if not file_path_in_context and not file_paths_in_request:
+            # Exception: explicit read commands might expect us to ask for a file
+            if any(phrase in request_lower for phrase in [
+                "read file", "show file", "display file", "view file", "cat"
+            ]):
+                return 0.3  # Lower confidence, but still attempt
+            return 0.0
+        
+        # High confidence for explicit read operations with file path
         if any(phrase in request_lower for phrase in [
             "read file", "show file", "display file", "view file", "cat"
         ]):
             return 0.9
         
-        # Medium confidence for file content requests
+        # Medium confidence for file content requests with file path
         if any(phrase in request_lower for phrase in [
             "content of", "what's in", "show me", "file contents"
         ]):
             return 0.7
         
-        # Lower confidence for general file operations
+        # Lower confidence for general file operations with file extensions mentioned
         if any(phrase in request_lower for phrase in [
             "read", "view", "show", "display"
         ]) and any(phrase in request_lower for phrase in [

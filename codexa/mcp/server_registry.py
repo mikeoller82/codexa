@@ -370,8 +370,37 @@ class MCPServerRegistry:
                 return matches
             return []
         
-        # Add default rules
+        # Rule 0: Basic filesystem operations (highest priority)
+        def basic_filesystem_rule(request: str, context: Dict) -> List[CapabilityMatch]:
+            filesystem_keywords = [
+                "read file", "write file", "create file", "delete file", "list directory",
+                "file content", "file contents", "show file", "display file", "view file",
+                "list files", "browse", "directory", "folder", "save file", "load file"
+            ]
+            request_lower = request.lower()
+            
+            # Also check for file extensions or path patterns
+            has_file_reference = (
+                any(keyword in request_lower for keyword in filesystem_keywords) or
+                any(ext in request_lower for ext in [".py", ".js", ".md", ".txt", ".json", ".yml", ".yaml", ".toml"]) or
+                "/" in request or "\\" in request  # Path separators
+            )
+            
+            if has_file_reference:
+                matches = []
+                for server in self.find_servers_by_capability("filesystem"):
+                    matches.append(CapabilityMatch(
+                        server_name=server,
+                        confidence=0.95,  # Highest priority for basic filesystem ops
+                        capabilities=["filesystem", "file_operations", "directory_operations"],
+                        metadata={"rule": "basic_filesystem", "priority": "highest"}
+                    ))
+                return matches
+            return []
+        
+        # Add default rules (filesystem rule first for highest priority)
         self.routing_rules.extend([
+            basic_filesystem_rule,  # Highest priority
             documentation_rule,
             analysis_rule,
             ui_generation_rule,
