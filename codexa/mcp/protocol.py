@@ -55,7 +55,8 @@ class MCPMessage:
             result["id"] = self.id
         if self.method:
             result["method"] = self.method
-        if self.params:
+        # Only include params if they are provided (JSON-RPC 2.0 compliance)
+        if self.params is not None:
             result["params"] = self.params
         if self.result is not None:
             result["result"] = self.result
@@ -236,3 +237,19 @@ class MCPProtocol:
     def create_initialized_notification() -> MCPMessage:
         """Create MCP initialized notification."""
         return MCPProtocol.create_notification("initialized")
+    
+    @staticmethod
+    def validate_request(message: MCPMessage) -> bool:
+        """Validate that a request message follows MCP protocol requirements."""
+        if not message.method:
+            return False
+        if not message.id:
+            return False
+        # For requests, params field should always be present (even if empty)
+        return True
+    
+    @staticmethod
+    def debug_format_message(message: MCPMessage, direction: str = "SEND") -> str:
+        """Format message for debug logging."""
+        msg_dict = message.to_dict()
+        return f"{direction} MCP: {json.dumps(msg_dict, indent=2)}"

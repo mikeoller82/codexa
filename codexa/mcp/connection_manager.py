@@ -156,6 +156,10 @@ class MCPConnection:
         try:
             start_time = datetime.now()
 
+            # Debug logging for request
+            if self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(f"Sending request to {self.config.name}: {MCPProtocol.debug_format_message(request, 'SEND')}")
+
             # Send request
             await self._write_message(request)
 

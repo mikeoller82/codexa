@@ -423,30 +423,25 @@ class SerenaClient:
     async def _discover_tools(self):
         """Discover available tools from Serena server."""
         try:
-            # Get tools list - try without params first (correct MCP protocol)
+            # Get tools list - omit params entirely for basic tools/list request
+            # This follows JSON-RPC 2.0 where params are optional
             result = await self.connection.send_request("tools/list", None)
 
             if isinstance(result, dict) and "tools" in result:
                 tools = result["tools"]
+                self.logger.debug(f"Successfully discovered {len(tools)} tools from Serena")
 
                 for tool in tools:
                     if isinstance(tool, dict) and "name" in tool:
                         tool_name = tool["name"]
                         self.available_tools[tool_name] = tool
-                        self.logger.debug(f"Discovered tool: {tool_name}")
+                        self.logger.debug(f"Registered Serena tool: {tool_name}")
+                
+                self.logger.info(f"Serena client connected with {len(self.available_tools)} tools")
+                return  # Success - don't continue to fallback
             else:
-                # If no params don't work, try with empty dict as fallback
-                self.logger.warning("tools/list without params failed, trying with empty params")
-                result = await self.connection.send_request("tools/list", {})
-
-                if isinstance(result, dict) and "tools" in result:
-                    tools = result["tools"]
-
-                    for tool in tools:
-                        if isinstance(tool, dict) and "name" in tool:
-                            tool_name = tool["name"]
-                            self.available_tools[tool_name] = tool
-                            self.logger.debug(f"Discovered tool: {tool_name}")
+                self.logger.warning(f"Unexpected response format from tools/list: {result}")
+                raise MCPError("Invalid tools/list response format", -32603)
 
         except Exception as e:
             self.logger.warning(f"Failed to discover tools via MCP protocol: {e}")
