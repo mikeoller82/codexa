@@ -178,7 +178,7 @@ class EnhancedConfig:
             "models": {
                 "openai": "gpt-4o-mini",
                 "anthropic": "claude-3-5-haiku-20241022",
-                "openrouter": "google/gemini-2.0-flash-001"
+                "openrouter": "openrouter/sonoma-sky-alpha"
             },
             "providers": {
                 "openai": {
@@ -277,13 +277,13 @@ class EnhancedConfig:
                 base_url="https://openrouter.ai/api/v1",
                 priority=3,
                 models=[
-                    ModelConfig("google/gemini-2.0-flash-001", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
-                    ModelConfig("anthropic/claude-3.5-sonnet", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
-                    ModelConfig("openai/gpt-4o", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
-                    ModelConfig("openai/gpt-4o-mini", "openrouter", capabilities=["code", "analysis", "tools"]),
-                    ModelConfig("qwen/qwen3-coder:free", "openrouter", capabilities=["code", "analysis"]),
-                    ModelConfig("qwen/qwen-2.5-coder-32b-instruct", "openrouter", capabilities=["code", "analysis"]),
-                    ModelConfig("deepseek/deepseek-coder", "openrouter", capabilities=["code", "analysis"])
+                    ModelConfig("openrouter/sonoma-sky-alpha", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
+                    ModelConfig("deepseek/deepseek-chat-v3.1:free", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
+                    ModelConfig("qwen/qwen3-coder:free", "openrouter", capabilities=["code", "analysis", "tools", "reasoning"]),
+                    ModelConfig("moonshotai/kimi-k2:free", "openrouter", capabilities=["code", "analysis", "tools"]),
+                    ModelConfig("google/gemini-2.0-flash-exp:free", "openrouter", capabilities=["code", "analysis"]),
+                    ModelConfig("qwen/qwen3-235b-a22b:free", "openrouter", capabilities=["code", "analysis"]),
+                    ModelConfig("meta-llama/llama-4-maverick:free", "openrouter", capabilities=["code", "analysis"])
                 ]
             )
         }
