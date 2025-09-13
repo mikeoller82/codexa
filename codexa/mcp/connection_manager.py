@@ -145,9 +145,20 @@ class MCPConnection:
     async def send_request(self, method: str, params: Optional[Dict[str, Any]] = None) -> Any:
         """Send request to MCP server."""
         if self.state != ConnectionState.CONNECTED:
-            raise MCPError(f"Server {self.config.name} not connected", MCPProtocol.SERVER_UNAVAILABLE)
+            raise MCPError(f"Server {self.config.name} not connected (state: {self.state.value})", MCPProtocol.SERVER_UNAVAILABLE)
 
         # Handle None params (no parameters) vs empty dict
+        # For initialize method, ensure params is properly formatted
+        if method == "initialize" and params:
+            # Ensure initialize has proper structure
+            if "clientInfo" not in params and "client" in params:
+                # Fix parameter structure for initialize
+                params = {
+                    "protocolVersion": params.get("protocolVersion", "2024-11-05"),
+                    "clientInfo": params.get("client", {"name": "codexa", "version": "1.0.1"}),
+                    "capabilities": params.get("capabilities", {})
+                }
+        
         if params is None:
             request = MCPProtocol.create_request(method, None)
         else:
@@ -184,19 +195,28 @@ class MCPConnection:
 
                     # Provide more specific error messages for common MCP errors
                     if error_code == -32602:  # INVALID_PARAMS
-                        raise MCPError(f"Invalid parameters for {method}: {error_message}", error_code)
+                        self.logger.warning(f"Invalid parameters for {method} on {self.config.name}: {error_message}")
+                        # For parameter errors, try to provide more context
+                        if method == "initialize":
+                            raise MCPError(f"Initialize failed on {self.config.name}: Check server configuration and protocol version compatibility. Error: {error_message}", error_code)
+                        else:
+                            raise MCPError(f"Invalid parameters for {method}: {error_message}. Check parameter format and required fields.", error_code)
                     elif error_code == -32601:  # METHOD_NOT_FOUND
-                        raise MCPError(f"Method {method} not found on server {self.config.name}", error_code)
+                        raise MCPError(f"Method {method} not found on server {self.config.name}. Server may not support this operation.", error_code)
                     elif error_code == -32600:  # INVALID_REQUEST
-                        raise MCPError(f"Invalid request to server {self.config.name}: {error_message}", error_code)
+                        raise MCPError(f"Invalid request to server {self.config.name}: {error_message}. Check request format.", error_code)
                     else:
-                        raise MCPError(f"Server error: {error_message}", error_code)
+                        raise MCPError(f"Server error from {self.config.name}: {error_message}", error_code)
 
                 return response.result
 
             except asyncio.TimeoutError:
                 self.metrics.failed_requests += 1
-                raise MCPError(f"Request timeout for {self.config.name}", MCPProtocol.TIMEOUT_ERROR)
+                self.logger.error(f"Request timeout for {self.config.name} after {self.config.timeout}s (method: {method})")
+                # Mark connection as potentially unhealthy after timeout
+                if self.metrics.failed_requests > self.metrics.total_requests * 0.3:  # 30% failure rate
+                    self.logger.warning(f"High failure rate detected for {self.config.name}, connection may be unstable")
+                raise MCPError(f"Request timeout for {self.config.name} (method: {method}, timeout: {self.config.timeout}s)", MCPProtocol.TIMEOUT_ERROR)
             finally:
                 self.pending_requests.pop(request.id, None)
 

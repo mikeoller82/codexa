@@ -405,7 +405,7 @@ class MCPService:
     
     def _map_request_to_tool_name(self, request: str) -> str:
         """Map a request string to the appropriate MCP tool name."""
-        # Handle filesystem operations mapping
+        # Handle filesystem operations mapping - use actual tool names from filesystem server
         filesystem_mappings = {
             "read_file": "read_file",
             "write_file": "write_file", 
@@ -415,8 +415,8 @@ class MCPService:
             "delete_file": "delete_file",
             "list_directory": "list_directory",
             "create_directory": "create_directory",
-            "tree": "get_directory_tree",
-            "get_directory_tree": "get_directory_tree",
+            "tree": "tree",  # Correct tool name
+            "get_directory_tree": "tree",  # Map to correct tool name
             "search_files": "search_files",
             "search_within_files": "search_within_files",
             "get_file_info": "get_file_info",

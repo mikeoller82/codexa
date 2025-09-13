@@ -104,9 +104,9 @@ class SerenaClient:
     async def activate_project(self, project_config: SerenaProjectConfig) -> bool:
         """Activate a project in Serena for semantic operations."""
         try:
-            # Call activate_project tool
+            # Call activate_project tool with correct parameter name
             result = await self.call_tool("activate_project", {
-                "project_path": project_config.path
+                "project": project_config.path
             })
 
             if result.get("success", False):
@@ -129,7 +129,8 @@ class SerenaClient:
         except MCPError as e:
             if "Invalid parameters" in str(e):
                 # Provide fallback for parameter validation issues
-                self.logger.warning(f"Parameter validation failed, providing fallback activation for {project_config.path}")
+                self.logger.warning(f"Parameter validation failed for activate_project, providing fallback activation for {project_config.path}")
+                self.logger.debug(f"Parameter validation error details: {e}")
                 self.active_project = project_config
                 self.onboarding_completed = False  # Assume not completed if we can't check
                 return True
@@ -722,9 +723,9 @@ class SerenaClient:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "project_path": {"type": "string"}
+                        "project": {"type": "string"}
                     },
-                    "required": ["project_path"]
+                    "required": ["project"]
                 }
             },
             "onboarding": {
@@ -834,7 +835,7 @@ class SerenaClient:
         try:
             if tool_name == "activate_project":
                 # Project activation - just return success since we're connected
-                return {"success": True, "message": f"Project {parameters.get('project_path', 'unknown')} activated (fallback)"}
+                return {"success": True, "message": f"Project {parameters.get('project', parameters.get('project_path', 'unknown'))} activated (fallback)"}
 
             elif tool_name == "check_onboarding_performed":
                 # Check onboarding - assume not performed for fallback
@@ -944,7 +945,7 @@ class SerenaClient:
     def _get_mock_response(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """Provide mock responses when Claude tools are not available."""
         if tool_name == "activate_project":
-            return {"success": True, "message": f"Project {parameters.get('project_path', 'unknown')} activated (mock)"}
+            return {"success": True, "message": f"Project {parameters.get('project', parameters.get('project_path', 'unknown'))} activated (mock)"}
         elif tool_name == "check_onboarding_performed":
             return {"performed": False, "message": "Onboarding status unknown (mock)"}
         elif tool_name == "onboarding":

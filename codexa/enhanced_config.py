@@ -306,7 +306,7 @@ class EnhancedConfig:
                 enabled=True,  # Always enabled by default for core filesystem operations
                 capabilities=["filesystem", "file_operations", "directory_operations", "file_search"],
                 priority=10,  # High priority for core operations
-                timeout=10  # Reasonable timeout for filesystem operations
+                timeout=60  # Extended timeout for large filesystem operations
             ),
             "serena": MCPServerConfig(
                 name="serena",
@@ -319,7 +319,7 @@ class EnhancedConfig:
                     "file-operations", "pattern-search", "code-refactoring"
                 ],
                 priority=5,  # High priority for semantic operations
-                timeout=30  # Reasonable timeout for language server operations
+                timeout=45  # Extended timeout for language server operations
             ),
             "context7": MCPServerConfig(
                 name="context7",
