@@ -359,7 +359,7 @@ class EnhancedCodexaAgent:
             )
 
             # Extract and set file paths from request for tools that need them
-            self._extract_and_set_file_paths(request, context)
+            self._extract_and_set_tool_parameters(request, context)
 
             # Show real-time tool discovery and planning
             console.print("[dim]🔍 Analyzing request and selecting tools...[/dim]")
@@ -453,28 +453,151 @@ class EnhancedCodexaAgent:
             console.print(f"[red]Request processing failed: {e}[/red]")
             self.logger.error(f"Request processing error: {e}")
 
-    def _extract_and_set_file_paths(self, request: str, context: ToolContext):
-        """Extract file paths from user request and set them in context for tools that need them."""
+    def _extract_and_set_tool_parameters(self, request: str, context: ToolContext):
+        """Extract tool-specific parameters from user request and set them in context."""
         import re
 
-        # Look for file paths with extensions
-        file_pattern = r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'
-        matches = re.findall(file_pattern, request)
+        # Extract bash command
+        if any(keyword in request.lower() for keyword in ["bash", "run", "execute", "command", "shell"]):
+            command = self._extract_bash_command(request)
+            if command:
+                context.update_state("command", command)
+                self.logger.debug(f"Extracted command from request: {command}")
 
-        if matches:
-            # Set the first file path found
-            context.update_state("file_path", matches[0])
-            self.logger.debug(f"Extracted file_path from request: {matches[0]}")
+        # Extract directory path for list operations
+        if any(keyword in request.lower() for keyword in ["list", "ls", "dir", "directory", "folder"]):
+            directory_path = self._extract_directory_path(request)
+            if directory_path:
+                context.update_state("directory_path", directory_path)
+                self.logger.debug(f"Extracted directory_path from request: {directory_path}")
+            else:
+                # Default to current directory
+                context.update_state("directory_path", ".")
+                self.logger.debug("Using default directory_path: .")
 
-        # Also look for quoted paths
+        # Extract file path for read operations
+        if any(keyword in request.lower() for keyword in ["read", "file", "cat", "show", "display"]):
+            file_path = self._extract_file_path(request)
+            if file_path:
+                context.update_state("file_path", file_path)
+                self.logger.debug(f"Extracted file_path from request: {file_path}")
+
+    def _extract_bash_command(self, request: str) -> str:
+        """Extract bash command from request string."""
+        import re
+
+        # Remove common prefixes
+        original_request = request
+        request = request.lower()
+        for prefix in ["run ", "execute ", "bash ", "shell ", "command "]:
+            if request.startswith(prefix):
+                prefix_len = len(prefix)
+                request = request[prefix_len:]
+                original_request = original_request[prefix_len:]
+
+        # If the command has quotes, preserve the entire command including the quote content
+        if "'" in original_request or '"' in original_request:
+            # Just return the entire command after removing the prefix
+            result = original_request.strip()
+            self.logger.debug(f"Extracted command with quotes: '{result}'")
+            return result
+
+        # If no quotes, take the rest of the command after the prefix
+        result = original_request.strip()
+        self.logger.debug(f"Extracted command: '{result}'")
+        return result
+
+    def _extract_directory_path(self, request: str) -> str:
+        """Extract directory path from request string."""
+        import re
+
+        # Look for directory patterns - more specific patterns first
+        patterns = [
+            r'directory\s+([^\s]+)',  # "directory path"
+            r'folder\s+([^\s]+)',     # "folder path"
+            r'ls\s+([^\s]+)',         # "ls path"
+            r'([a-zA-Z0-9_/.-]+/)',  # Paths ending with /
+        ]
+
+        # First try the specific patterns
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                candidate = matches[0]
+                # Validate it looks like a path, not natural language
+                if self._is_valid_directory_path(candidate):
+                    return candidate
+
+        # Only use quoted content if it looks like an actual path
         quoted_pattern = r'["\']([^"\']+)["\']'
-        matches = re.findall(quoted_pattern, request)
+        matches = re.findall(quoted_pattern, request, re.IGNORECASE)
+        if matches:
+            candidate = matches[0]
+            if self._is_valid_directory_path(candidate):
+                return candidate
 
-        for match in matches:
-            if '/' in match or '\\' in match or '.' in match:
-                context.update_state("file_path", match)
-                self.logger.debug(f"Extracted quoted file_path from request: {match}")
-                break
+        return ""
+
+    def _is_valid_directory_path(self, path: str) -> bool:
+        """Check if the extracted string looks like a valid directory path."""
+        import re
+        import os
+
+        # Remove common path separators and check
+        clean_path = path.strip()
+
+        # Skip if it contains natural language patterns
+        skip_patterns = [
+            r'\boverview\b',
+            r'\bproject structure\b',
+            r'\bdetailed\b',
+            r'\bentire\b',
+            r'\bincluding\b',
+            r'\bprovide\b',
+            r'\bshow\b',
+            r'\bme\b',
+            r'\bthe\b',
+            r'\bof\b',
+            r'\bfor\b',
+            r'\band\b'
+        ]
+
+        for pattern in skip_patterns:
+            if re.search(pattern, clean_path, re.IGNORECASE):
+                return False
+
+        # Check if it looks like a path (contains path separators or valid directory names)
+        path_indicators = [
+            r'[/\\]',  # Path separators
+            r'\.\.',    # Parent directory
+            r'\.',      # Current directory or file extension
+            r'^[a-zA-Z0-9_-]+$',  # Simple directory name
+        ]
+
+        for indicator in path_indicators:
+            if re.search(indicator, clean_path):
+                return True
+
+        return False
+
+    def _extract_file_path(self, request: str) -> str:
+        """Extract file path from request string."""
+        import re
+
+        # Look for file paths in quotes
+        patterns = [
+            r'["\']([^"\']+)["\']',  # Quoted paths
+            r'file\s+([^\s]+)',      # "file path"
+            r'read\s+([^\s]+)',      # "read path"
+            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'  # Files with extensions
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                return matches[0]
+
+        return ""
 
     async def _process_with_ai_fallback(self, request: str) -> Optional[str]:
         """Fallback to direct AI processing when tool system fails."""

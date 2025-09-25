@@ -178,7 +178,7 @@ class EnhancedConfig:
             "models": {
                 "openai": "gpt-4o-mini",
                 "anthropic": "claude-3-5-haiku-20241022",
-                "openrouter": "openrouter/sonoma-sky-alpha"
+                "openrouter": "x-ai/grok-4-fast:free"
             },
             "providers": {
                 "openai": {

@@ -30,7 +30,7 @@ class CreateDirectoryTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"directory_path"}
+        return set()  # No required context - directory path is extracted from user request
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""

@@ -4,7 +4,7 @@ Write tool - Writes a file to the local filesystem.
 
 import os
 from pathlib import Path
-from typing import Set
+from typing import Set, Optional
 from ..base.tool_interface import Tool, ToolContext, ToolResult
 
 
@@ -42,7 +42,7 @@ class WriteTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"file_path", "content"}
+        return set()  # No required context - will extract from request or ask
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Determine if this tool can handle the request."""
@@ -63,25 +63,134 @@ class WriteTool(Tool):
             return 0.7
         
         return 0.0
-    
+
+    async def validate_context(self, context: ToolContext) -> bool:
+        """
+        Validate that context contains required information.
+        Override base method to handle file path and content more flexibly.
+        """
+        # Try to determine file path from various sources
+        file_path = (
+            context.get_state("file_path") or
+            getattr(context, 'file_path', None)
+        )
+
+        # Try to determine content from various sources
+        content = context.get_state("content")
+
+        # If we can determine both file path and content, context is valid
+        if file_path and content is not None:
+            return True
+
+        # If missing file path, check if we can extract from request
+        if not file_path and context.user_request:
+            extracted_path = self._extract_file_path_from_request(context.user_request)
+            if extracted_path:
+                return True
+
+        # If missing content, we might be able to extract from request in some cases
+        if content is None and context.user_request:
+            # This is harder to extract reliably, so we'll allow the execute method to handle it
+            return True
+
+        return True
+
+    def _extract_file_path_from_request(self, request: str) -> Optional[str]:
+        """Extract file path from user request."""
+        import re
+
+        if not request:
+            return None
+
+        # Look for file paths in various formats
+        patterns = [
+            r'["\']([^"\']+\.[a-zA-Z0-9]+)["\']',  # Quoted paths
+            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)',  # Files with extensions
+            r'([a-zA-Z0-9_/.-]+/[a-zA-Z0-9_.-]+)',  # Paths with directories
+            r'(?:file|path|write|create|save)\s+([a-zA-Z0-9_/.-]+)',  # File after keywords
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                candidate = matches[0]
+                # Basic validation - should look like a file path
+                if (candidate.endswith(('.py', '.js', '.ts', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css')) or
+                    '/' in candidate or '\\' in candidate):
+                    return candidate
+
+        return None
+
+    def _extract_content_from_request(self, request: str) -> Optional[str]:
+        """Extract file content from user request."""
+        import re
+
+        if not request:
+            return None
+
+        # Look for content patterns in code blocks
+        code_block_patterns = [
+            r'```(?:python|javascript|html|css|json|yaml|yml|bash|sh)?\s*\n(.*?)\n```',  # Code blocks
+            r'["\']{3}(.*?)["\']{3}',  # Triple quoted strings
+            r'["\']([^"\']{200,})["\']',  # Long quoted strings
+        ]
+
+        for pattern in code_block_patterns:
+            matches = re.findall(pattern, request, re.DOTALL)
+            if matches:
+                content = matches[0].strip()
+                if content and len(content) > 10:  # Minimum content length
+                    return content
+
+        # Look for content after specific keywords
+        content_patterns = [
+            r'(?:content|body|text):\s*["\'](.*?)["\']',
+            r'(?:content|body|text):\s*(\{.*?\})',
+            r'(?:write|create|save)\s+.*?with\s+(.*?)(?:\s|$)',
+        ]
+
+        for pattern in content_patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE | re.DOTALL)
+            if matches:
+                content = matches[0].strip()
+                if content and len(content) > 5:
+                    return content
+
+        return None
+
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute the Write tool."""
         try:
             # Extract parameters
             file_path = context.get_state("file_path")
             content = context.get_state("content")
-            
+
+            # If no file path in context, try to extract from user request
+            if not file_path and context.user_request:
+                file_path = self._extract_file_path_from_request(context.user_request)
+
             if not file_path:
                 return ToolResult.error_result(
-                    error="Missing required parameter: file_path",
+                    error="Missing required parameter: file_path. Please specify a file path to write.",
                     tool_name=self.name
                 )
-            
+
             if content is None:
-                return ToolResult.error_result(
-                    error="Missing required parameter: content",
-                    tool_name=self.name
-                )
+                # Try to extract content from user request as fallback
+                if context.user_request:
+                    extracted_content = self._extract_content_from_request(context.user_request)
+                    if extracted_content:
+                        content = extracted_content
+                    else:
+                        return ToolResult.error_result(
+                            error="Missing required parameter: content. Please provide content to write to the file.",
+                            tool_name=self.name
+                        )
+                else:
+                    return ToolResult.error_result(
+                        error="Missing required parameter: content. Please provide content to write to the file.",
+                        tool_name=self.name
+                    )
             
             # Convert to Path object
             target_path = Path(file_path)

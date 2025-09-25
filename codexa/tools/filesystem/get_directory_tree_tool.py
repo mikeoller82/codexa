@@ -30,7 +30,7 @@ class GetDirectoryTreeTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"directory_path"}
+        return set()  # No required context - will extract from request or use defaults
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Check if this tool can handle the request."""
@@ -54,17 +54,23 @@ class GetDirectoryTreeTool(Tool):
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute directory tree generation."""
         try:
-            # Get parameters from context
-            directory_path = context.get_state("directory_path") or context.current_dir or "."
+            # Get parameters from context with fallbacks
+            directory_path = (
+                context.get_state("directory_path") or
+                context.current_dir or
+                context.current_path or
+                "."
+            )
             depth = context.get_state("depth", 3)
             follow_symlinks = context.get_state("follow_symlinks", False)
-            
-            # Try to extract from request if needed
-            extracted = self._extract_tree_parameters(context.user_request)
-            if extracted.get("directory_path"):
-                directory_path = extracted["directory_path"]
-            if extracted.get("depth"):
-                depth = extracted["depth"]
+
+            # Try to extract from request if available
+            if context.user_request:
+                extracted = self._extract_tree_parameters(context.user_request)
+                if extracted.get("directory_path"):
+                    directory_path = extracted["directory_path"]
+                if extracted.get("depth"):
+                    depth = extracted["depth"]
             
             # Try MCP filesystem first
             mcp_result = await self._get_tree_with_mcp(directory_path, depth, follow_symlinks, context)
@@ -181,33 +187,134 @@ class GetDirectoryTreeTool(Tool):
             return tree
         
         return build_tree(path, 0)
-    
+
+    def _is_valid_path_candidate(self, path: str) -> bool:
+        """Check if the extracted string looks like a valid directory path."""
+        import re
+        import os
+
+        # Remove common path separators and check
+        clean_path = path.strip()
+
+        # Skip if it contains natural language patterns
+        skip_patterns = [
+            r'\boverview\b',
+            r'\bproject structure\b',
+            r'\bdetailed\b',
+            r'\bentire\b',
+            r'\bincluding\b',
+            r'\bprovide\b',
+            r'\bshow\b',
+            r'\bme\b',
+            r'\bthe\b',
+            r'\bof\b',
+            r'\bfor\b',
+            r'\band\b',
+            r'\ball\b',
+            r'\bkey\b',
+            r'\bfiles\b',
+            r'\bdetected\b',
+            r'\blanguages\b',
+            r'\bframeworks\b',
+            r'\bexisting\b',
+            r'\bweb\b',
+            r'\binterfaces\b',
+            r'\bAPI\b',
+            r'\bdefinitions\b',
+            r'\bfocus\b',
+            r'\bon\b',
+            r'\bbackend\b',
+            r'\bfrontend\b',
+            r'\bstubs\b'
+        ]
+
+        for pattern in skip_patterns:
+            if re.search(pattern, clean_path, re.IGNORECASE):
+                return False
+
+        # Check if it looks like a path (contains path separators or valid directory names)
+        path_indicators = [
+            r'[/\\]',  # Path separators
+            r'\.\.',    # Parent directory
+            r'\.',      # Current directory or file extension
+            r'^[a-zA-Z0-9_-]+$',  # Simple directory name
+        ]
+
+        for indicator in path_indicators:
+            if re.search(indicator, clean_path):
+                return True
+
+        return False
+
+    async def validate_context(self, context: ToolContext) -> bool:
+        """
+        Validate that context contains required information.
+
+        Override base method to handle directory path more flexibly.
+        """
+        # Try to determine directory path from various sources
+        directory_path = (
+            context.get_state("directory_path") or
+            context.current_dir or
+            context.current_path or
+            getattr(context, 'directory_path', None) or
+            "."
+        )
+
+        # If we can determine a directory path, context is valid
+        if directory_path:
+            return True
+
+        # If no directory path can be determined, check if we can extract from request
+        if context.user_request:
+            extracted = self._extract_tree_parameters(context.user_request)
+            if extracted.get("directory_path"):
+                return True
+
+        # Default fallback - use current directory
+        return True
+
     def _extract_tree_parameters(self, request: str) -> Dict[str, Any]:
         """Extract tree parameters from request."""
         result = {"directory_path": "", "depth": None}
-        
-        # Look for directory path
+
+        if not request:
+            return result
+
+        # Look for directory path - improved patterns to avoid false positives
         path_patterns = [
             r'tree\s+for\s+([^\s]+)',
             r'structure\s+of\s+([^\s]+)',
-            r'tree\s+([^\s]+)',
-            r'["\']([^"\']+)["\']'  # Quoted paths
+            r'directory\s+([^\s]+)',
+            r'folder\s+([^\s]+)',
+            r'path\s+([^\s]+)',
         ]
-        
+
         for pattern in path_patterns:
             matches = re.findall(pattern, request, re.IGNORECASE)
             if matches:
-                result["directory_path"] = matches[0]
-                break
-        
+                # Avoid capturing words like "tree", "structure", "directory", "folder", "path"
+                candidate = matches[0]
+                skip_words = {'tree', 'structure', 'directory', 'folder', 'path', 'of', 'for', 'me', 'the', 'show'}
+                if candidate.lower() not in skip_words and self._is_valid_path_candidate(candidate):
+                    result["directory_path"] = candidate
+                    break
+
+        # Only use quoted content if it looks like an actual path
+        quoted_pattern = r'["\']([^"\']+)["\']'
+        matches = re.findall(quoted_pattern, request, re.IGNORECASE)
+        if matches and self._is_valid_path_candidate(matches[0]):
+            result["directory_path"] = matches[0]
+
         # Look for depth specification
         depth_patterns = [
             r'depth\s+(\d+)',
             r'level\s+(\d+)',
             r'(\d+)\s+levels?',
-            r'max\s+(\d+)'
+            r'max\s+(\d+)',
+            r'recursive\s+(\d+)'
         ]
-        
+
         for pattern in depth_patterns:
             matches = re.findall(pattern, request, re.IGNORECASE)
             if matches:
@@ -216,5 +323,5 @@ class GetDirectoryTreeTool(Tool):
                     break
                 except ValueError:
                     continue
-        
+
         return result

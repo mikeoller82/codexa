@@ -83,19 +83,112 @@ class BashTool(Tool):
             return 0.3
         
         return 0.0
-    
+
+    def _extract_command_from_request(self, request: str) -> Optional[str]:
+        """Extract a shell command from user request."""
+        import re
+
+        if not request:
+            return None
+
+        # Look for command patterns
+        patterns = [
+            # Commands after keywords without colon (highest priority)
+            r'(?:run|execute|bash|shell|command)\s+([^\s][^.!?]+)',
+            # Commands after keywords with colon
+            r'(?:run|execute|bash|shell|command):\s*([^\s][^.!?]+)',
+            # Shell commands with arguments (including echo with quotes)
+            r'(ls\s+[^.!?]|cd\s+[^.!?]|mkdir\s+[^.!?]|cp\s+[^.!?]|mv\s+[^.!?]|rm\s+[^.!?]|grep\s+[^.!?]|find\s+[^.!?]|git\s+[^.!?]|npm\s+[^.!?]|pip\s+[^.!?]|python\s+[^.!?]|node\s+[^.!?]|echo\s+["\'][^"\']*["\']|echo\s+\w+)',
+            # Single commands at start of sentence
+            r'^\s*(ls|cd|pwd|mkdir|cp|mv|rm|grep|find|git|npm|pip|python|node|make|echo|cat|head|tail|less|vim|nano|chmod|chown|ps|kill|df|du|tar|zip|unzip|ssh|scp|curl|wget|docker|kubectl|cargo|go|rustc|gcc|g\+\+|make|cmake|mvn|gradle|bundle|gem|brew|apt|yum|dnf|pacman|systemctl|journalctl|ssh-keygen|openssl|tar|gzip|gunzip|bzip2|bunzip2|xz|unxz|7z|unrar|sshfs|rsync|screen|tmux|nohup|bg|fg|jobs|export|alias|source|which|whereis|locate|updatedb|chmod|chown|chgrp|touch|mkdir|rmdir|rm|cp|mv|ln|ls|dir|vdir|cd|pwd|pushd|popd|dirs|tree|file|stat|wc|sort|uniq|cut|tr|sed|awk|grep|egrep|fgrep|head|tail|more|less|cat|tac|rev|nl|od|hexdump|xxd|strings|base64|uuencode|uudecode|fold|fmt|pr|column|expand|unexpand|join|paste|tee|split|csplit|shuf|sort|uniq|comm|tac|rev|cut|tr|sed|awk|grep|egrep|fgrep|head|tail|more|less|cat|tac|rev|nl|od|hexdump|xxd|strings|base64|uuencode|uudecode|fold|fmt|pr|column|expand|unexpand|join|paste|tee|split|csplit|shuf|sort|uniq|comm)(\s|$)',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE | re.MULTILINE)
+            if matches:
+                # Extract the matched command
+                if isinstance(matches[0], tuple):
+                    command = matches[0][0] if matches[0][0] else matches[0][1]
+                else:
+                    command = matches[0]
+
+                # Clean up the command
+                command = command.strip()
+
+                # Validate it looks like a real command
+                if self._is_valid_command(command):
+                    return command
+
+        return None
+
+    def _is_valid_command(self, command: str) -> bool:
+        """Check if the extracted string looks like a valid shell command."""
+        # Split into parts
+        parts = command.split()
+
+        if not parts:
+            return False
+
+        # First word should be a command (not natural language)
+        first_word = parts[0].lower()
+
+        # Invalid single words that are natural language
+        invalid_words = {
+            "turn", "return", "and", "or", "but", "if", "then", "else",
+            "when", "where", "what", "how", "why", "this", "that", "these", "those",
+            "call", "please", "can", "could", "would", "should", "might", "must",
+            "the", "a", "an", "to", "of", "in", "on", "at", "for", "with", "by",
+            "from", "about", "into", "through", "during", "before", "after",
+            "above", "below", "between", "among", "throughout", "since", "until",
+            "while", "because", "although", "though", "even", "unless", "whether",
+            "either", "neither", "both", "each", "every", "any", "all", "some",
+            "most", "few", "several", "many", "much", "more", "less", "least",
+            "own", "other", "another", "same", "such", "only", "just", "already",
+            "yet", "still", "even", "again", "further", "then", "thus", "hence",
+            "therefore", "however", "nevertheless", "nonetheless", "meanwhile",
+            "moreover", "furthermore", "additionally", "also", "too", "as", "well"
+        }
+
+        # Check if first word is obviously natural language
+        if first_word in invalid_words:
+            return False
+
+        # Check if it looks like a command (starts with common command prefixes)
+        valid_start_patterns = [
+            r'^[a-z]+',  # Basic command
+            r'^\.[a-z]+',  # Command starting with dot
+            r'^[a-z]+[0-9]*$',  # Command with numbers
+            r'^sudo\s+[a-z]',  # sudo command
+            r'^nohup\s+[a-z]',  # nohup command
+        ]
+
+        import re
+        for pattern in valid_start_patterns:
+            if re.match(pattern, first_word):
+                return True
+
+        # If it has options or arguments, it's more likely to be a command
+        if len(parts) > 1 and any(opt.startswith('-') for opt in parts[1:]):
+            return True
+
+        return False
+
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute the Bash tool."""
         try:
             # Extract parameters
-            command = context.get_state("command") or context.user_request or ""
+            command = context.get_state("command")
             timeout = context.get_state("timeout", 120000)  # Default 2 minutes in ms
             description = context.get_state("description", "Execute bash command")
             run_in_background = context.get_state("run_in_background", False)
-            
+
+            # If no command in context, try to extract from user request
+            if not command and context.user_request:
+                command = self._extract_command_from_request(context.user_request)
+
             if not command:
                 return ToolResult.error_result(
-                    error="Missing required parameter: command",
+                    error="Missing required parameter: command. Please provide a shell command to execute.",
                     tool_name=self.name
                 )
             
@@ -117,10 +210,10 @@ class BashTool(Tool):
             
             # Convert timeout from milliseconds to seconds
             timeout_seconds = timeout / 1000.0 if timeout else None
-            
-            # Validate timeout limits
-            if timeout_seconds and timeout_seconds > 600:  # Max 10 minutes
-                timeout_seconds = 600
+
+            # Validate timeout limits - reduce from 10 minutes to 30 seconds for interactive use
+            if timeout_seconds and timeout_seconds > 30:
+                timeout_seconds = 30
             
             # Execute command
             if run_in_background:

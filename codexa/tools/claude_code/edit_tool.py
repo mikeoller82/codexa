@@ -4,7 +4,7 @@ Edit tool - Performs exact string replacements in files.
 
 import os
 from pathlib import Path
-from typing import Set
+from typing import Set, Optional
 from ..base.tool_interface import Tool, ToolContext, ToolResult
 
 
@@ -25,7 +25,7 @@ class EditTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"file_path", "old_string", "new_string"}
+        return set()  # No required context - will extract from request or ask
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Determine if this tool can handle the request."""
@@ -46,7 +46,31 @@ class EditTool(Tool):
             return 0.7
         
         return 0.0
-    
+
+    async def validate_context(self, context: ToolContext) -> bool:
+        """
+        Validate that context contains required information.
+        Override base method to handle edit parameters more flexibly.
+        """
+        # Try to determine parameters from various sources
+        file_path = (
+            context.get_state("file_path") or
+            getattr(context, 'file_path', None)
+        )
+        old_string = context.get_state("old_string")
+        new_string = context.get_state("new_string")
+
+        # If we can determine all parameters, context is valid
+        if file_path and old_string is not None and new_string is not None:
+            return True
+
+        # If missing parameters, check if we can extract from request
+        if context.user_request:
+            # For simplicity, allow execute method to handle extraction
+            return True
+
+        return True
+
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute the Edit tool."""
         try:

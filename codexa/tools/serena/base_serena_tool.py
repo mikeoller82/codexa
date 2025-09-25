@@ -118,18 +118,37 @@ class BaseSerenaTool(Tool):
             return False
     
     async def validate_context(self, context: ToolContext) -> bool:
-        """Validate Serena-specific context requirements.""" 
+        """Validate Serena-specific context requirements."""
         if not await super().validate_context(context):
             return False
-        
+
         # Basic check - we need access to MCP service to get Serena client
         if not context.mcp_service:
             self.logger.debug("No MCP service available for Serena tools")
             return False
-        
-        # Don't check connection here - that happens during initialization
-        # This allows the tool to proceed to initialization where connection will be established
-        return True
+
+        # Check if MCP service has Serena capabilities
+        # Allow validation to pass if MCP service exists, even if Serena client isn't fully connected yet
+        # The actual connection will be established during initialization
+        try:
+            # Check if MCP service has get_serena_client method
+            if hasattr(context.mcp_service, 'get_serena_client'):
+                # Try to get Serena client but don't fail validation if it's not immediately available
+                serena_client = context.mcp_service.get_serena_client()
+                if serena_client:
+                    self.logger.debug("Serena client available in MCP service")
+                    return True
+                else:
+                    self.logger.debug("Serena client not yet available in MCP service, but will attempt initialization")
+                    return True  # Allow validation to pass - initialization will handle connection
+            else:
+                self.logger.debug("MCP service does not have get_serena_client method")
+                return False
+
+        except Exception as e:
+            self.logger.debug(f"Error checking Serena client availability: {e}")
+            # Allow validation to pass - initialization will handle connection issues
+            return True
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Enhanced request matching for Serena capabilities."""

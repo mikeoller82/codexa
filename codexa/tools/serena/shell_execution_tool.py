@@ -38,12 +38,34 @@ class ShellExecutionTool(BaseSerenaTool):
         return 120.0
     
     async def execute(self, context: ToolContext) -> ToolResult:
-        """Execute shell command through Serena."""
+        """Execute shell command through Serena with improved natural language support."""
         try:
+            # Check if this is a natural language request
+            request = context.user_request or ""
+            is_natural_language = (
+                len(request.split()) > 3 and
+                not any(request.startswith(prefix) for prefix in ['/', '--', '-'])
+            )
+            
             # Extract command from request
             command = self._extract_command(context)
+            
+            # For natural language requests, be more helpful when no command is found
             if not command:
-                return self._create_error_result("No shell command provided")
+                if is_natural_language:
+                    # Try to infer a command from the natural language request
+                    inferred_command = self._infer_command_from_natural_language(request)
+                    if inferred_command:
+                        command = inferred_command
+                        # Log that we inferred a command
+                        self.logger.info(f"Inferred command from natural language: {command}")
+                    else:
+                        return self._create_error_result(
+                            "I couldn't determine what command you want to run. Please specify the command more clearly, "
+                            "for example: 'run npm install' or 'execute git status'."
+                        )
+                else:
+                    return self._create_error_result("No shell command provided")
             
             # Extract working directory
             working_dir = self._extract_working_directory(context)
@@ -118,13 +140,30 @@ class ShellExecutionTool(BaseSerenaTool):
             return self._create_error_result(f"Shell execution failed: {e}")
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
-        """Enhanced request matching for shell operations - only match when actual commands are present."""
+        """Enhanced request matching for shell operations with improved natural language support."""
         confidence = super().can_handle_request(request, context)
 
-        # First check if we can actually extract a command - if not, return 0
-        extracted_command = self._extract_command(context)
-        if not extracted_command:
-            return 0.0
+        # Check if this is a natural language request
+        is_natural_language = (
+            len(request.split()) > 3 and
+            not any(request.startswith(prefix) for prefix in ['/', '--', '-'])
+        )
+
+        # For natural language requests, be more lenient with command extraction
+        if is_natural_language:
+            # Try to extract a command - but don't immediately return 0 if we can't find one
+            extracted_command = self._extract_command(context)
+            if extracted_command:
+                confidence = max(confidence, 0.6)  # Boost confidence if we found a command
+            else:
+                # For natural language, still consider this tool even without a clear command
+                # We'll try to extract one during execution
+                pass
+        else:
+            # For structured requests, be more strict
+            extracted_command = self._extract_command(context)
+            if not extracted_command:
+                return 0.0
 
         request_lower = request.lower()
 
@@ -138,6 +177,9 @@ class ShellExecutionTool(BaseSerenaTool):
                 # Only boost confidence if we have an actual command after the keyword
                 if self._has_command_after_keyword(request, keyword):
                     confidence = max(confidence, 0.8)
+                # For natural language, be more lenient
+                elif is_natural_language:
+                    confidence = max(confidence, 0.5)
 
         # Very high confidence for command-like patterns that indicate actual commands
         command_prefixes = ["npm ", "pip ", "git ", "python ", "node ", "make ", "./", "cd "]
@@ -156,8 +198,26 @@ class ShellExecutionTool(BaseSerenaTool):
             if re.search(pattern, request):
                 confidence = max(confidence, 0.7)
 
+        # For natural language requests, look for additional patterns
+        if is_natural_language:
+            nl_command_patterns = [
+                r'using\s+[\w\-./]+',
+                r'with\s+[\w\-./]+\s+command',
+                r'through\s+terminal',
+                r'via\s+command\s+line',
+                r'in\s+shell',
+                r'using\s+bash',
+                r'need\s+to\s+run',
+                r'want\s+to\s+execute'
+            ]
+            
+            for pattern in nl_command_patterns:
+                if re.search(pattern, request_lower):
+                    confidence = max(confidence, 0.6)
+
         # Additional validation: ensure the extracted command looks like a real command
-        if extracted_command and not self._looks_like_command(extracted_command):
+        # Only apply this check for non-natural language requests to avoid false negatives
+        if not is_natural_language and extracted_command and not self._looks_like_command(extracted_command):
             return 0.0
 
         return confidence
@@ -185,15 +245,22 @@ class ShellExecutionTool(BaseSerenaTool):
         return any(command_indicators)
 
     def _extract_command(self, context: ToolContext) -> Optional[str]:
-        """Extract shell command from request - be more restrictive to avoid false positives."""
+        """Extract shell command from request - improved for natural language support."""
         request = context.user_request or ""
+
+        # Check if this is a natural language request
+        is_natural_language = (
+            len(request.split()) > 3 and
+            not any(request.startswith(prefix) for prefix in ['/', '--', '-'])
+        )
 
         # Look for commands after specific keywords with validation
         command_patterns = [
             r'(?:run|execute)\s+(.+)',  # Only run/execute, not generic "command"
             r'\$\s*(.+)',  # Shell variable/command substitution
             r'shell:\s*(.+)',
-            r'bash:\s*(.+)'
+            r'bash:\s*(.+)',
+            r'terminal:\s*(.+)'
         ]
 
         for pattern in command_patterns:
@@ -225,6 +292,35 @@ class ShellExecutionTool(BaseSerenaTool):
             words[0].lower() in command_prefixes and
             self._is_clear_command_request(request)):
             return request.strip()
+
+        # For natural language requests, try to extract commands more aggressively
+        if is_natural_language:
+            # Look for command-like patterns in natural language
+            nl_command_patterns = [
+                # Look for "run X" or "execute X" anywhere in the request
+                r'(?:run|execute|use)\s+([\w\-./]+(?:\s+[\w\-./]+){0,3})',
+                # Look for command with arguments
+                r'(?:with|using)\s+([\w\-./]+(?:\s+[\w\-./]+){0,3})',
+                # Look for "X command" patterns
+                r'([\w\-./]+(?:\s+[\w\-./]+){0,3})\s+command'
+            ]
+            
+            for pattern in nl_command_patterns:
+                matches = re.findall(pattern, request, re.IGNORECASE)
+                for match in matches:
+                    potential_command = match.strip()
+                    if self._looks_like_command(potential_command):
+                        return potential_command
+            
+            # Extract potential commands from the request
+            words = request.split()
+            for i in range(len(words)):
+                if words[i].lower() in command_prefixes and i+1 < len(words):
+                    # Extract command and up to 3 arguments
+                    end_idx = min(i+4, len(words))
+                    potential_command = ' '.join(words[i:end_idx])
+                    if self._looks_like_command(potential_command):
+                        return potential_command
 
         return None
     
@@ -287,6 +383,99 @@ class ShellExecutionTool(BaseSerenaTool):
         ]
         
         return any(command_indicators)
+
+    def _infer_command_from_natural_language(self, request: str) -> Optional[str]:
+        """Attempt to infer a shell command from a natural language request."""
+        request_lower = request.lower()
+        
+        # Common command mappings for natural language
+        command_mappings = {
+            "install": {
+                "npm": "npm install",
+                "package": "npm install",
+                "dependency": "npm install",
+                "python": "pip install",
+                "pip": "pip install",
+                "requirements": "pip install -r requirements.txt",
+                "gems": "gem install",
+                "ruby": "gem install",
+                "go": "go get",
+            },
+            "build": {
+                "project": "npm run build",
+                "app": "npm run build",
+                "application": "npm run build",
+                "frontend": "npm run build",
+                "react": "npm run build",
+                "vue": "npm run build",
+                "angular": "ng build",
+                "webpack": "webpack",
+            },
+            "run": {
+                "tests": "npm test",
+                "test": "npm test",
+                "server": "npm start",
+                "app": "npm start",
+                "application": "npm start",
+                "dev": "npm run dev",
+                "development": "npm run dev",
+            },
+            "check": {
+                "status": "git status",
+                "changes": "git status",
+                "git": "git status",
+                "branch": "git branch",
+                "commits": "git log",
+                "history": "git log",
+            },
+            "list": {
+                "files": "ls -la",
+                "directory": "ls -la",
+                "folder": "ls -la",
+                "contents": "ls -la",
+            }
+        }
+        
+        # Try to match intent and subject
+        for intent, subjects in command_mappings.items():
+            if intent in request_lower:
+                for subject, command in subjects.items():
+                    if subject in request_lower:
+                        return command
+        
+        # Try to extract specific commands mentioned in the request
+        command_prefixes = [
+            "npm", "pip", "python", "node", "git", "make", "docker",
+            "curl", "wget", "ls", "cd", "mkdir", "cp", "mv", "rm"
+        ]
+        
+        words = request_lower.split()
+        for i, word in enumerate(words):
+            if word in command_prefixes and i < len(words) - 1:
+                # Extract the command and up to 3 arguments
+                end_idx = min(i + 4, len(words))
+                return ' '.join(words[i:end_idx])
+        
+        # Look for specific action phrases
+        action_phrases = {
+            "check git status": "git status",
+            "see git status": "git status",
+            "install dependencies": "npm install",
+            "install packages": "npm install",
+            "install requirements": "pip install -r requirements.txt",
+            "run tests": "npm test",
+            "start server": "npm start",
+            "build project": "npm run build",
+            "list files": "ls -la",
+            "show files": "ls -la",
+            "show directory": "ls -la"
+        }
+        
+        for phrase, command in action_phrases.items():
+            if phrase in request_lower:
+                return command
+        
+        return None
 
     def _is_clear_command_request(self, request: str) -> bool:
         """Check if the request clearly indicates a shell command should be executed."""

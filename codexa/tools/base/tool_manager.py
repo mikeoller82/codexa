@@ -144,6 +144,74 @@ class ToolManager:
         
         self.logger.info(f"Tool discovery complete: {total_discovered} tools registered")
         return total_discovered
+
+    def _extract_bash_command(self, request: str) -> str:
+        """Extract bash command from request string."""
+        import re
+
+        # Debug log
+        self.logger.debug(f"Extracting bash command from: '{request}'")
+
+        # Remove common prefixes
+        original_request = request
+        request = request.lower()
+        for prefix in ["run ", "execute ", "bash ", "shell ", "command "]:
+            if request.startswith(prefix):
+                prefix_len = len(prefix)
+                request = request[prefix_len:]
+                original_request = original_request[prefix_len:]
+
+        # If the command has quotes, preserve the entire command including the quote content
+        # This handles cases like "echo 'Hello World'"
+        if "'" in original_request or '"' in original_request:
+            # Just return the entire command after removing the prefix
+            result = original_request.strip()
+            self.logger.debug(f"Extracted command with quotes: '{result}'")
+            return result
+
+        # If no quotes, take the rest of the command after the prefix
+        result = original_request.strip()
+        self.logger.debug(f"Extracted command: '{result}'")
+        return result
+
+    def _extract_directory_path(self, request: str) -> str:
+        """Extract directory path from request string."""
+        import re
+
+        # Look for directory patterns
+        patterns = [
+            r'["\']([^"\']+)["\']',  # Quoted paths
+            r'directory\s+([^\s]+)',  # "directory path"
+            r'folder\s+([^\s]+)',     # "folder path"
+            r'ls\s+([^\s]+)',         # "ls path"
+            r'([a-zA-Z0-9_/.-]+/)',  # Paths ending with /
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                return matches[0]
+
+        return ""
+
+    def _extract_file_path(self, request: str) -> str:
+        """Extract file path from request string."""
+        import re
+
+        # Look for file paths in quotes
+        patterns = [
+            r'["\']([^"\']+)["\']',  # Quoted paths
+            r'file\s+([^\s]+)',      # "file path"
+            r'read\s+([^\s]+)',      # "read path"
+            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'  # Files with extensions
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                return matches[0]
+
+        return ""
     
     async def process_request(self, 
                             request: str,
@@ -299,12 +367,13 @@ class ToolManager:
                     tool_name=tool_name
                 )
             
-            # Extract Claude Code parameters if this is a Claude Code tool
+            # Extract parameters for basic tools and Claude Code tools
+            user_request = context.user_request or ""
+
+            # Handle Claude Code tools
             if (CLAUDE_CODE_AVAILABLE and claude_code_registry and
                 hasattr(tool, 'category') and tool.category == "claude_code"):
                 try:
-                    # Extract parameters from user request
-                    user_request = context.user_request or ""
                     extracted_params = claude_code_registry.extract_parameters_from_request(
                         tool_name, user_request, context
                     )
@@ -350,7 +419,6 @@ class ToolManager:
                     self.logger.debug(f"Claude Code parameter extraction failed for {tool_name}: {e}")
 
                     # For natural language requests, don't let parameter extraction failures stop execution
-                    user_request = context.user_request or ""
                     is_natural_language = (
                         len(user_request.split()) > 3 and
                         not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
@@ -360,6 +428,45 @@ class ToolManager:
                         self.logger.info(f"Natural language request - proceeding despite parameter extraction failure for {tool_name}")
                         context.update_state("extraction_warnings",
                                            context.get_state("extraction_warnings", []) + [str(e)])
+                        
+                        # For natural language requests, try to infer parameters from the request
+                        # This helps with Claude Code tools that might need specific parameters
+                        if hasattr(tool, 'required_context') and tool.required_context:
+                            for param in tool.required_context:
+                                # Only try to infer if parameter is not already set
+                                if context.get_state(param) is None:
+                                    inferred_value = self._infer_parameter_from_natural_language(
+                                        param, user_request, tool_name
+                                    )
+                                    if inferred_value is not None:
+                                        context.update_state(param, inferred_value)
+                                        self.logger.info(f"Inferred parameter {param}={inferred_value} for {tool_name}")
+                    # Continue with execution - not critical
+
+            # Handle basic and system tools parameter extraction
+            elif hasattr(tool, 'category') and tool.category in ["basic", "system"]:
+                try:
+                    # Extract parameters for basic tools based on tool name
+                    if tool_name == "bash":
+                        command = self._extract_bash_command(user_request)
+                        if command:
+                            context.update_state("command", command)
+                            self.logger.debug(f"Extracted bash command: {command}")
+
+                    elif tool_name == "list":
+                        directory_path = self._extract_directory_path(user_request)
+                        if directory_path:
+                            context.update_state("directory_path", directory_path)
+                            self.logger.debug(f"Extracted directory path: {directory_path}")
+
+                    elif tool_name == "read":
+                        file_path = self._extract_file_path(user_request)
+                        if file_path:
+                            context.update_state("file_path", file_path)
+                            self.logger.debug(f"Extracted file path: {file_path}")
+
+                except Exception as e:
+                    self.logger.debug(f"Basic tool parameter extraction failed for {tool_name}: {e}")
                     # Continue with execution - not critical
             
             # Check concurrent execution limits
@@ -744,20 +851,50 @@ class ToolManager:
                 is_natural_language = len(user_request.split()) > 3 and not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
 
                 if is_natural_language:
-                    # For natural language, only require parameters that are clearly essential
-                    essential_params = ['file_path', 'pattern', 'directory_path']  # These are truly required
+                    # For natural language, be extremely lenient - we'll try to infer parameters during execution
+                    # Only check for truly essential parameters that can't be inferred
+                    essential_params = []  # Empty list - we'll try to infer all parameters
+                    
+                    # For Claude Code tools, be even more lenient
+                    if hasattr(tool, 'category') and tool.category == "claude_code":
+                        # For Claude Code tools, don't block execution due to missing parameters
+                        # We'll try to infer them during execution
+                        return True
+                    
+                    # For Serena tools, also be very lenient
+                    if hasattr(tool, 'category') and tool.category == "serena":
+                        # For Serena tools, don't block execution due to missing parameters
+                        return True
+                    
+                    # For other tools, only check truly essential parameters
                     for required_key in tool.required_context:
                         if required_key in essential_params:
                             # Check if the key exists as an attribute (legacy support)
                             if hasattr(context, required_key):
                                 attr_value = getattr(context, required_key)
                                 if attr_value is None:
-                                    return False
+                                    # Try to infer the parameter
+                                    inferred_value = self._infer_parameter_from_natural_language(
+                                        required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                                    )
+                                    if inferred_value is not None:
+                                        # Set the inferred value
+                                        context.update_state(required_key, inferred_value)
+                                    else:
+                                        return False
 
                             # Enhanced validation: Check actual parameter values in shared_state
                             param_value = context.get_state(required_key)
                             if param_value is None:
-                                return False
+                                # Try to infer the parameter
+                                inferred_value = self._infer_parameter_from_natural_language(
+                                    required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                                )
+                                if inferred_value is not None:
+                                    # Set the inferred value
+                                    context.update_state(required_key, inferred_value)
+                                else:
+                                    return False
                             elif isinstance(param_value, str) and not param_value.strip():
                                 return False
                 else:
@@ -802,6 +939,95 @@ class ToolManager:
         # TODO: Implement error severity analysis
         return False
     
+    def _infer_parameter_from_natural_language(self, param_name: str, request: str, tool_name: str) -> Any:
+        """
+        Attempt to infer parameter values from natural language requests.
+        This helps tools work better with conversational inputs.
+        
+        Args:
+            param_name: The parameter name to infer
+            request: The natural language request
+            tool_name: The name of the tool being executed
+            
+        Returns:
+            Inferred parameter value or None if no inference could be made
+        """
+        request_lower = request.lower()
+        
+        # Common parameter patterns for different parameter types
+        file_patterns = [
+            r'(?:file|path)(?:\s+named|\s+called|\s+at|\s+in|\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?',
+            r'(?:open|read|write|edit|modify|update|create)\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?',
+            r'(?:in|to|from|the)\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?'
+        ]
+        
+        directory_patterns = [
+            r'(?:directory|folder|dir)(?:\s+named|\s+called|\s+at|\s+in|\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]+/?)["\']?',
+            r'(?:cd|navigate|browse|list)\s+["\']?([^"\'<>\n]+/?)["\']?'
+        ]
+        
+        pattern_patterns = [
+            r'(?:pattern|regex|expression|search for|find)(?:\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]{2,})["\']?',
+            r'(?:matching|matches|containing|contains)\s+["\']?([^"\'<>\n]{2,})["\']?'
+        ]
+        
+        content_patterns = [
+            r'(?:content|text|data)(?:\s+is|\s+of|\s+as|\s*:)?\s+["\']?([^"\']{5,})["\']?',
+            r'(?:with|containing|contains)\s+(?:content|text|data)(?:\s+is|\s+of|\s+as|\s*:)?\s+["\']?([^"\']{5,})["\']?'
+        ]
+        
+        # Parameter-specific inference
+        if param_name in ['file_path', 'path', 'file', 'source_file', 'target_file']:
+            for pattern in file_patterns:
+                matches = re.findall(pattern, request_lower)
+                if matches:
+                    # Return the first match that looks like a file path
+                    for match in matches:
+                        if '.' in match and not match.endswith('/'):
+                            return match.strip()
+        
+        elif param_name in ['directory_path', 'dir', 'folder', 'directory']:
+            for pattern in directory_patterns:
+                matches = re.findall(pattern, request_lower)
+                if matches:
+                    return matches[0].strip()
+        
+        elif param_name in ['pattern', 'regex', 'search_pattern', 'query']:
+            for pattern in pattern_patterns:
+                matches = re.findall(pattern, request_lower)
+                if matches:
+                    return matches[0].strip()
+        
+        elif param_name in ['content', 'text', 'data']:
+            for pattern in content_patterns:
+                matches = re.findall(pattern, request_lower)
+                if matches:
+                    return matches[0].strip()
+        
+        # Tool-specific parameter inference
+        if tool_name == 'file_search':
+            if param_name == 'filePattern':
+                # Look for file extensions or patterns
+                ext_matches = re.findall(r'\.([a-zA-Z0-9]{1,5})\b', request_lower)
+                if ext_matches:
+                    return f"*.{ext_matches[0]}"
+        
+        elif tool_name == 'fulltext_search':
+            if param_name == 'pattern':
+                # Extract potential search terms
+                # Look for quoted text first
+                quoted = re.findall(r'["\']([^"\']+)["\']', request)
+                if quoted:
+                    return quoted[0]
+                
+                # Look for words after search-related terms
+                search_terms = re.findall(r'(?:search|find|look for|containing)\s+(\w+)', request_lower)
+                if search_terms:
+                    return search_terms[0]
+        
+        # Default parameter inference based on common patterns
+        return None
+
     def _format_execution_output(self, results: List[ToolResult]) -> str:
         """Format execution results for display."""
         output_parts = []

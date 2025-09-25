@@ -24,7 +24,7 @@ class Config:
         self.default_models = {
             "openai": "gpt-5",
             "anthropic": "claude-4-sonnet",
-            "openrouter": "openrouter/sonoma-sky-alpha"
+            "openrouter": "x-ai/grok-4-fast:free"
         }
         
         # Load user config if it exists

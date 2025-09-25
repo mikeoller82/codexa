@@ -544,10 +544,15 @@ class SerenaClient:
                 "name": "get_symbols_overview",
                 "description": "Gets an overview of the top-level symbols defined in a given file.",
                 "inputSchema": {
-                    "type": "object", 
+                    "type": "object",
                     "properties": {"relative_path": {"type": "string"}},
                     "required": ["relative_path"]
                 }
+            },
+            "get_current_config": {
+                "name": "get_current_config",
+                "description": "Prints the current configuration of the agent, including the active and available projects, tools, contexts, and modes.",
+                "inputSchema": {"type": "object", "properties": {}}
             },
             "insert_after_symbol": {
                 "name": "insert_after_symbol",
@@ -702,8 +707,8 @@ class SerenaClient:
         })
         
         self.project_tools.update({
-            "activate_project", "onboarding", "check_onboarding_performed", 
-            "prepare_for_new_conversation"
+            "activate_project", "onboarding", "check_onboarding_performed",
+            "prepare_for_new_conversation", "get_current_config"
         })
         
         self.execution_tools.update({"execute_shell_command"})

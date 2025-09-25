@@ -46,7 +46,7 @@ class ReadTool(Tool):
     
     @property
     def required_context(self) -> Set[str]:
-        return {"file_path"}
+        return set()  # No required context - will extract from request or ask
     
     def can_handle_request(self, request: str, context: ToolContext) -> float:
         """Determine if this tool can handle the request."""
@@ -90,7 +90,58 @@ class ReadTool(Tool):
             return 0.5
         
         return 0.0
-    
+
+    async def validate_context(self, context: ToolContext) -> bool:
+        """
+        Validate that context contains required information.
+
+        Override base method to handle file path more flexibly.
+        """
+        # Try to determine file path from various sources
+        file_path = (
+            context.get_state("file_path") or
+            getattr(context, 'file_path', None)
+        )
+
+        # If we can determine a file path, context is valid
+        if file_path:
+            return True
+
+        # If no file path can be determined, check if we can extract from request
+        if context.user_request:
+            extracted = self._extract_file_path_from_request(context.user_request)
+            if extracted:
+                return True
+
+        # Read tool can still work if user request contains file references
+        return True
+
+    def _extract_file_path_from_request(self, request: str) -> Optional[str]:
+        """Extract file path from user request."""
+        import re
+
+        if not request:
+            return None
+
+        # Look for file paths in various formats
+        patterns = [
+            r'["\']([^"\']+\.[a-zA-Z0-9]+)["\']',  # Quoted paths
+            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)',  # Files with extensions
+            r'([a-zA-Z0-9_/.-]+/[a-zA-Z0-9_.-]+)',  # Paths with directories
+            r'(?:file|path|read|show|display)\s+([a-zA-Z0-9_/.-]+)',  # File after keywords
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                candidate = matches[0]
+                # Basic validation - should look like a file path
+                if (candidate.endswith(('.py', '.js', '.ts', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css')) or
+                    '/' in candidate or '\\' in candidate):
+                    return candidate
+
+        return None
+
     async def execute(self, context: ToolContext) -> ToolResult:
         """Execute the Read tool."""
         try:
@@ -98,10 +149,14 @@ class ReadTool(Tool):
             file_path = context.get_state("file_path")
             offset = context.get_state("offset")
             limit = context.get_state("limit", 2000)  # Default 2000 lines
-            
+
+            # Try to extract file_path from request if not in context
+            if not file_path and context.user_request:
+                file_path = self._extract_file_path_from_request(context.user_request)
+
             if not file_path:
                 return ToolResult.error_result(
-                    error="Missing required parameter: file_path",
+                    error="Missing required parameter: file_path. Please specify a file path in your request.",
                     tool_name=self.name
                 )
             
@@ -283,4 +338,30 @@ class ReadTool(Tool):
             return f"{size_bytes / (1024 * 1024):.1f}MB"
         else:
             return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
+
+    def _extract_file_path_from_request(self, request: str) -> Optional[str]:
+        """Extract file path from user request."""
+        import re
+
+        if not request:
+            return None
+
+        # Look for file paths in various formats
+        patterns = [
+            r'["\']([^"\']+\.[a-zA-Z0-9]+)["\']',  # Quoted paths
+            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)',  # Files with extensions
+            r'([a-zA-Z0-9_/.-]+/[a-zA-Z0-9_.-]+)',  # Paths with directories
+            r'(?:file|path|read|show|display)\s+([a-zA-Z0-9_/.-]+)',  # File after keywords
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, request, re.IGNORECASE)
+            if matches:
+                candidate = matches[0]
+                # Basic validation - should look like a file path
+                if (candidate.endswith(('.py', '.js', '.ts', '.md', '.txt', '.json', '.yaml', '.yml', '.html', '.css')) or
+                    '/' in candidate or '\\' in candidate):
+                    return candidate
+
+        return None
 
