@@ -79,21 +79,29 @@ class ReadTool(Tool):
             )
 
     def _extract_file_path(self, request: str) -> str:
-        """Extract file path from request string."""
+        """Extract file path from request string.
+        - Prefer quoted paths; fall back to tokens after 'read' or 'file'
+        - Do not return single-letter tokens or bare words without separators
+        """
         import re
 
-        # Look for file paths in quotes
-        patterns = [
-            r'["\']([^"\']+)["\']',  # Quoted paths
-            r'file\s+([^\s]+)',      # "file path"
-            r'read\s+([^\s]+)',      # "read path"
-            r'([a-zA-Z0-9_/.-]+\.[a-zA-Z0-9]+)'  # Files with extensions
-        ]
+        # Prefer quoted paths
+        m = re.search(r'"([^"]+)"|\'([^\']+)\'', request)
+        if m:
+            return (m.group(1) or m.group(2)).strip()
 
-        for pattern in patterns:
-            matches = re.findall(pattern, request, re.IGNORECASE)
-            if matches:
-                return matches[0]
+        # After keywords
+        m = re.search(r'\b(read|file)\s+([^\s]+)', request, re.IGNORECASE)
+        if m:
+            candidate = m.group(2).strip()
+            # Avoid returning stray tokens like 'n' or flags
+            if len(candidate) > 1 or "/" in candidate or "." in candidate:
+                return candidate
+
+        # Heuristic: path-like with separators or extensions
+        m = re.search(r'([a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+)', request)
+        if m:
+            return m.group(1).strip()
 
         return ""
 

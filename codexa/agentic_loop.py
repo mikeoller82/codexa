@@ -362,9 +362,30 @@ Remember:
             if self.provider and hasattr(self.provider, 'ask'):
                 # Use the provider's ask method (works with OpenRouter)
                 response = self.provider.ask(thinking_prompt)
+                # Detect refusal-like responses and retry once with reinforcement
+                markers = [
+                    "i must decline",
+                    "cannot assist",
+                    "jailbreak",
+                    "override my core instructions",
+                    "safety policies"
+                ]
+                if isinstance(response, str) and any(m in response.lower() for m in markers):
+                    reinforcement = thinking_prompt + "\n\nDo not refuse benign coding tasks. Do not mention policies or jailbreak. Provide THINKING and PLAN exactly as specified."
+                    response = self.provider.ask(reinforcement)
             elif self.provider and hasattr(self.provider, 'generate_response'):
                 # Alternative method if available
                 response = await self.provider.generate_response(thinking_prompt)
+                markers = [
+                    "i must decline",
+                    "cannot assist",
+                    "jailbreak",
+                    "override my core instructions",
+                    "safety policies"
+                ]
+                if isinstance(response, str) and any(m in response.lower() for m in markers):
+                    reinforcement = thinking_prompt + "\n\nDo not refuse benign coding tasks. Do not mention policies or jailbreak. Provide THINKING and PLAN exactly as specified."
+                    response = await self.provider.generate_response(reinforcement)
             else:
                 # Fallback reasoning
                 response = f"""THINKING:

@@ -29,9 +29,10 @@ class MCPMessage:
     error: Optional[Dict[str, Any]] = None
     
     def __post_init__(self):
-        """Generate ID if not provided for requests."""
-        if self.method and not self.id:
-            self.id = str(uuid.uuid4())
+        """Do not auto-generate IDs here; requests must set id explicitly.
+        This prevents notifications from being misclassified as requests."""
+        # Intentionally left blank to avoid assigning IDs to notifications
+        pass
     
     @property
     def message_type(self) -> MCPMessageType:

@@ -8,6 +8,8 @@ import asyncio
 from typing import Set, Dict, Any
 import tempfile
 import os
+import shlex
+from pathlib import Path
 
 from ..base.tool_interface import Tool, ToolResult, ToolContext, ToolPriority
 
@@ -70,18 +72,21 @@ class BashTool(Tool):
                     tool_name=self.name
                 )
 
+            # Normalize common cases (e.g., 'Python' -> 'python3')
+            normalized = self._normalize_command(command)
+
             # Execute command
-            result = await self._execute_command(command)
+            result = await self._execute_command(normalized)
 
             return ToolResult.success_result(
                 data={
-                    "command": command,
+                    "command": normalized,
                     "exit_code": result["exit_code"],
                     "stdout": result["stdout"],
                     "stderr": result["stderr"]
                 },
                 tool_name=self.name,
-                output=f"Command executed: {command}"
+                output=f"Command executed: {normalized}"
             )
 
         except Exception as e:
@@ -91,22 +96,62 @@ class BashTool(Tool):
             )
 
     def _extract_command(self, request: str) -> str:
-        """Extract command from request string."""
-        # Simple extraction - look for command-like patterns
+        """Extract the full shell command from the user request.
+        - Preserves original casing and spacing
+        - Removes known prefixes case-insensitively
+        - Returns the remaining text as the command (handles quoted and unquoted)
+        """
         import re
 
-        # Remove common prefixes
-        request = request.lower()
-        for prefix in ["run ", "execute ", "bash ", "shell ", "command "]:
-            if request.startswith(prefix):
-                request = request[len(prefix):]
+        original = request
+        lowered = request.lower()
 
-        # Extract quoted commands or first word
-        match = re.search(r'["\']([^"\']+)["\']|(\w+)', request)
-        if match:
-            return match.group(1) or match.group(2)
+        # Known prefixes to strip (case-insensitive)
+        prefixes = ["run ", "execute ", "bash ", "shell ", "command "]
+        for prefix in prefixes:
+            if lowered.startswith(prefix):
+                # Strip the same number of characters from the original to preserve case
+                request = original[len(prefix):]
+                break
+        else:
+            # No prefix detected; use the original request
+            request = original
 
-        return request.strip()
+        request = request.strip()
+        if not request:
+            return ""
+
+        # If the entire remaining text is quoted, strip the surrounding quotes
+        if (request.startswith('"') and request.endswith('"')) or (request.startswith("'") and request.endswith("'")):
+            return request[1:-1].strip()
+
+        # Otherwise return the remainder as-is (full command with args/flags)
+        return request
+
+    def _normalize_command(self, command: str) -> str:
+        """Normalize common invocations and set safe defaults.
+        - Map capitalized 'Python' to 'python3'
+        - If command starts with 'python' and no version, prefer python3
+        - Ensure pip -> pip3 when python3 is present
+        """
+        cmd = command.strip()
+        if not cmd:
+            return cmd
+
+        # Handle 'Python' capitalization from model outputs
+        if cmd.startswith('Python '):
+            cmd = 'python3 ' + cmd[len('Python '):]
+
+        # Prefer python3 when available in venv; otherwise leave as-is
+        if cmd.startswith('python '):
+            cmd = 'python3 ' + cmd[len('python '):]
+
+        # Map 'pip ' to 'pip3 ' if python3 exists
+        if cmd.startswith('pip '):
+            if Path('/usr/bin/python3').exists() or Path('/home/mike/codexa/venv/bin/python').exists():
+                cmd = 'pip3 ' + cmd[len('pip '):]
+
+        return cmd
 
     async def _execute_command(self, command: str) -> Dict[str, Any]:
         """Execute a bash command and return results."""
