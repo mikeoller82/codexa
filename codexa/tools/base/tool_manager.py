@@ -850,42 +850,35 @@ class ToolManager:
                 user_request = context.user_request or ""
                 is_natural_language = len(user_request.split()) > 3 and not any(user_request.startswith(prefix) for prefix in ['/', '--', '-'])
 
+                # For Claude Code tools, be extremely lenient
+                if hasattr(tool, 'category') and tool.category == "claude_code":
+                    # For Claude Code tools, don't block execution due to missing parameters
+                    # We'll try to infer them during execution
+                    return True
+                
+                # For Serena tools, also be very lenient
+                if hasattr(tool, 'category') and tool.category == "serena":
+                    # For Serena tools, don't block execution due to missing parameters
+                    # We'll try to infer them during execution
+                    return True
+                
+                # For shell execution tools, be extremely lenient
+                if hasattr(tool, 'name') and any(name in tool.name.lower() for name in ['shell', 'bash', 'command', 'execute']):
+                    # For shell execution tools, don't block execution due to missing parameters
+                    # We'll try to infer them during execution
+                    return True
+
                 if is_natural_language:
                     # For natural language, be extremely lenient - we'll try to infer parameters during execution
                     # Only check for truly essential parameters that can't be inferred
                     essential_params = []  # Empty list - we'll try to infer all parameters
                     
-                    # For Claude Code tools, be even more lenient
-                    if hasattr(tool, 'category') and tool.category == "claude_code":
-                        # For Claude Code tools, don't block execution due to missing parameters
-                        # We'll try to infer them during execution
-                        return True
-                    
-                    # For Serena tools, also be very lenient
-                    if hasattr(tool, 'category') and tool.category == "serena":
-                        # For Serena tools, don't block execution due to missing parameters
-                        return True
-                    
-                    # For other tools, only check truly essential parameters
+                    # For other tools, try to infer all parameters
                     for required_key in tool.required_context:
-                        if required_key in essential_params:
-                            # Check if the key exists as an attribute (legacy support)
-                            if hasattr(context, required_key):
-                                attr_value = getattr(context, required_key)
-                                if attr_value is None:
-                                    # Try to infer the parameter
-                                    inferred_value = self._infer_parameter_from_natural_language(
-                                        required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
-                                    )
-                                    if inferred_value is not None:
-                                        # Set the inferred value
-                                        context.update_state(required_key, inferred_value)
-                                    else:
-                                        return False
-
-                            # Enhanced validation: Check actual parameter values in shared_state
-                            param_value = context.get_state(required_key)
-                            if param_value is None:
+                        # Check if the key exists as an attribute (legacy support)
+                        if hasattr(context, required_key):
+                            attr_value = getattr(context, required_key)
+                            if attr_value is None:
                                 # Try to infer the parameter
                                 inferred_value = self._infer_parameter_from_natural_language(
                                     required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
@@ -893,31 +886,79 @@ class ToolManager:
                                 if inferred_value is not None:
                                     # Set the inferred value
                                     context.update_state(required_key, inferred_value)
-                                else:
-                                    return False
-                            elif isinstance(param_value, str) and not param_value.strip():
-                                return False
-                else:
-                    # For structured requests, be more strict but still forgiving
-                    for required_key in tool.required_context:
-                        # Check if the key exists as an attribute (legacy support)
-                        if hasattr(context, required_key):
-                            attr_value = getattr(context, required_key)
-                            if attr_value is None:
-                                # For tools that require specific context, be more strict
-                                if required_key in ['file_path', 'pattern', 'directory_path']:
+                                elif required_key in essential_params:
+                                    # Only fail if this is truly essential
                                     return False
 
                         # Enhanced validation: Check actual parameter values in shared_state
                         param_value = context.get_state(required_key)
                         if param_value is None:
-                            # For tools that require specific parameters, be more strict
-                            if required_key in ['file_path', 'pattern', 'directory_path', 'content']:
+                            # Try to infer the parameter
+                            inferred_value = self._infer_parameter_from_natural_language(
+                                required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                            )
+                            if inferred_value is not None:
+                                # Set the inferred value
+                                context.update_state(required_key, inferred_value)
+                            elif required_key in essential_params:
+                                # Only fail if this is truly essential
                                 return False
                         elif isinstance(param_value, str) and not param_value.strip():
+                            # For empty string parameters, try to infer
+                            inferred_value = self._infer_parameter_from_natural_language(
+                                required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                            )
+                            if inferred_value is not None:
+                                # Set the inferred value
+                                context.update_state(required_key, inferred_value)
+                            elif required_key in essential_params:
+                                # Only fail if this is truly essential
+                                return False
+                    
+                    # For natural language, always try to execute the tool
+                    return True
+                else:
+                    # For structured requests, be more lenient than before
+                    for required_key in tool.required_context:
+                        # Check if the key exists as an attribute (legacy support)
+                        if hasattr(context, required_key):
+                            attr_value = getattr(context, required_key)
+                            if attr_value is None:
+                                # Try to infer the parameter first
+                                inferred_value = self._infer_parameter_from_natural_language(
+                                    required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                                )
+                                if inferred_value is not None:
+                                    # Set the inferred value
+                                    context.update_state(required_key, inferred_value)
+                                # For tools that require specific context, be more strict
+                                elif required_key in ['file_path', 'pattern', 'directory_path']:
+                                    return False
+
+                        # Enhanced validation: Check actual parameter values in shared_state
+                        param_value = context.get_state(required_key)
+                        if param_value is None:
+                            # Try to infer the parameter first
+                            inferred_value = self._infer_parameter_from_natural_language(
+                                required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                            )
+                            if inferred_value is not None:
+                                # Set the inferred value
+                                context.update_state(required_key, inferred_value)
+                            # For tools that require specific parameters, be more strict
+                            elif required_key in ['file_path', 'pattern', 'directory_path', 'content']:
+                                return False
+                        elif isinstance(param_value, str) and not param_value.strip():
+                            # Try to infer the parameter first
+                            inferred_value = self._infer_parameter_from_natural_language(
+                                required_key, user_request, tool.name if hasattr(tool, 'name') else "unknown"
+                            )
+                            if inferred_value is not None:
+                                # Set the inferred value
+                                context.update_state(required_key, inferred_value)
                             # Empty string parameters are also invalid for critical tools
                             # Exception: content can be empty for write operations (creating empty files)
-                            if required_key in ['file_path', 'pattern', 'directory_path']:
+                            elif required_key in ['file_path', 'pattern', 'directory_path']:
                                 return False
                             elif required_key == 'content' and hasattr(tool, 'name') and tool.name not in ['Write', 'write_file']:
                                 return False
@@ -954,66 +995,183 @@ class ToolManager:
         """
         request_lower = request.lower()
         
-        # Common parameter patterns for different parameter types
+        # Enhanced parameter patterns for different parameter types
         file_patterns = [
+            # Explicit file references
             r'(?:file|path)(?:\s+named|\s+called|\s+at|\s+in|\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?',
+            # Action-based file references
             r'(?:open|read|write|edit|modify|update|create)\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?',
-            r'(?:in|to|from|the)\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?'
+            # Preposition-based file references
+            r'(?:in|to|from|the)\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?',
+            # Quoted file paths
+            r'["\']([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']',
+            # File paths with extensions
+            r'\b([/\w\-\.]+\.[a-zA-Z0-9]{1,5})\b',
+            # File paths with directories
+            r'\b((?:\.{1,2})?/[/\w\-\.]+\.[a-zA-Z0-9]{1,5})\b',
+            # File references with "the file"
+            r'the\s+file\s+["\']?([^"\'<>\n]+)["\']?',
+            # File references with "named"
+            r'named\s+["\']?([^"\'<>\n]+\.[a-zA-Z0-9]+)["\']?'
         ]
         
         directory_patterns = [
+            # Explicit directory references
             r'(?:directory|folder|dir)(?:\s+named|\s+called|\s+at|\s+in|\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]+/?)["\']?',
-            r'(?:cd|navigate|browse|list)\s+["\']?([^"\'<>\n]+/?)["\']?'
+            # Action-based directory references
+            r'(?:cd|navigate|browse|list|change\s+to)\s+["\']?([^"\'<>\n]+/?)["\']?',
+            # Directory paths with slashes
+            r'\b((?:\.{1,2})?/[/\w\-\.]+/)\b',
+            # Quoted directory paths
+            r'["\']([^"\'<>\n]+/)["\']',
+            # Directory references with "the directory"
+            r'the\s+(?:directory|folder|dir)\s+["\']?([^"\'<>\n]+)["\']?',
+            # Directory references with "in"
+            r'in\s+the\s+["\']?([^"\'<>\n]+/?)["\']?'
         ]
         
         pattern_patterns = [
+            # Explicit pattern references
             r'(?:pattern|regex|expression|search for|find)(?:\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]{2,})["\']?',
-            r'(?:matching|matches|containing|contains)\s+["\']?([^"\'<>\n]{2,})["\']?'
+            # Content-based pattern references
+            r'(?:matching|matches|containing|contains)\s+["\']?([^"\'<>\n]{2,})["\']?',
+            # Quoted patterns
+            r'["\']([^"\'<>\n]{2,})["\']',
+            # Pattern references with "the pattern"
+            r'the\s+(?:pattern|regex|expression)\s+["\']?([^"\'<>\n]{2,})["\']?',
+            # Pattern references with "for"
+            r'for\s+["\']?([^"\'<>\n]{2,})["\']?',
+            # Pattern references with "text"
+            r'text\s+["\']?([^"\'<>\n]{2,})["\']?'
         ]
         
         content_patterns = [
+            # Explicit content references
             r'(?:content|text|data)(?:\s+is|\s+of|\s+as|\s*:)?\s+["\']?([^"\']{5,})["\']?',
-            r'(?:with|containing|contains)\s+(?:content|text|data)(?:\s+is|\s+of|\s+as|\s*:)?\s+["\']?([^"\']{5,})["\']?'
+            # Content references with prepositions
+            r'(?:with|containing|contains)\s+(?:content|text|data)(?:\s+is|\s+of|\s+as|\s*:)?\s+["\']?([^"\']{5,})["\']?',
+            # Quoted content
+            r'["\']([^"\']{5,})["\']',
+            # Content references with "the content"
+            r'the\s+(?:content|text|data)\s+["\']?([^"\']{5,})["\']?',
+            # Content after "write" or "add"
+            r'(?:write|add)\s+["\']?([^"\']{5,})["\']?'
         ]
         
-        # Parameter-specific inference
-        if param_name in ['file_path', 'path', 'file', 'source_file', 'target_file']:
+        command_patterns = [
+            # Explicit command references
+            r'(?:command|run|execute)(?:\s+is|\s+of|\s*:)?\s+["\']?([^"\'<>\n]+)["\']?',
+            # Command references with "the command"
+            r'the\s+command\s+["\']?([^"\'<>\n]+)["\']?',
+            # Quoted commands
+            r'["\']([^"\'<>\n]+)["\']',
+            # Commands after "run" or "execute"
+            r'(?:run|execute)\s+["\']?([^"\'<>\n]+)["\']?',
+            # Commands with "bash" or "shell"
+            r'(?:bash|shell):\s*["\']?([^"\'<>\n]+)["\']?'
+        ]
+        
+        # Parameter-specific inference with enhanced matching
+        if param_name in ['file_path', 'path', 'file', 'source_file', 'target_file', 'filename']:
+            # Try all file patterns
             for pattern in file_patterns:
-                matches = re.findall(pattern, request_lower)
+                matches = re.findall(pattern, request)
                 if matches:
                     # Return the first match that looks like a file path
                     for match in matches:
                         if '.' in match and not match.endswith('/'):
                             return match.strip()
+            
+            # If no match found, look for any word that might be a filename
+            words = request.split()
+            for word in words:
+                if '.' in word and not word.endswith('/') and not word.startswith(('http://', 'https://')):
+                    return word.strip()
         
         elif param_name in ['directory_path', 'dir', 'folder', 'directory']:
+            # Try all directory patterns
             for pattern in directory_patterns:
-                matches = re.findall(pattern, request_lower)
+                matches = re.findall(pattern, request)
                 if matches:
                     return matches[0].strip()
+            
+            # If no match found, look for any word that might be a directory
+            words = request.split()
+            for word in words:
+                if word.endswith('/') or word in ['.', '..', 'src', 'dist', 'build', 'public', 'app', 'test', 'docs']:
+                    return word.strip()
         
-        elif param_name in ['pattern', 'regex', 'search_pattern', 'query']:
+        elif param_name in ['pattern', 'regex', 'search_pattern', 'query', 'search']:
+            # Try all pattern patterns
             for pattern in pattern_patterns:
-                matches = re.findall(pattern, request_lower)
+                matches = re.findall(pattern, request)
                 if matches:
                     return matches[0].strip()
+            
+            # Look for words after search-related terms
+            search_terms = re.findall(r'(?:search|find|look for|containing|matches|grep)\s+(\w+)', request_lower)
+            if search_terms:
+                return search_terms[0].strip()
         
         elif param_name in ['content', 'text', 'data']:
+            # Try all content patterns
             for pattern in content_patterns:
-                matches = re.findall(pattern, request_lower)
+                matches = re.findall(pattern, request)
                 if matches:
                     return matches[0].strip()
+            
+            # Look for content after write-related terms
+            write_terms = re.findall(r'(?:write|add|put|insert)\s+["\']?([^"\']{5,})["\']?', request_lower)
+            if write_terms:
+                return write_terms[0].strip()
         
-        # Tool-specific parameter inference
-        if tool_name == 'file_search':
-            if param_name == 'filePattern':
+        elif param_name in ['command', 'cmd', 'shell_command', 'bash_command']:
+            # Try all command patterns
+            for pattern in command_patterns:
+                matches = re.findall(pattern, request)
+                if matches:
+                    return matches[0].strip()
+            
+            # Look for common command prefixes
+            command_prefixes = [
+                'npm', 'pip', 'python', 'node', 'git', 'make', 'docker',
+                'curl', 'wget', 'ls', 'cd', 'mkdir', 'cp', 'mv', 'rm',
+                'find', 'grep', 'cat', 'touch', 'echo', 'ps', 'df', 'free'
+            ]
+            
+            words = request_lower.split()
+            for i, word in enumerate(words):
+                if word in command_prefixes and i < len(words) - 1:
+                    # Extract the command and up to 5 arguments
+                    end_idx = min(i + 6, len(words))
+                    return ' '.join(words[i:end_idx])
+        
+        # Tool-specific parameter inference with enhanced matching
+        if tool_name in ['file_search', 'FileSearch', 'search_files']:
+            if param_name in ['filePattern', 'pattern', 'file_pattern']:
                 # Look for file extensions or patterns
                 ext_matches = re.findall(r'\.([a-zA-Z0-9]{1,5})\b', request_lower)
                 if ext_matches:
                     return f"*.{ext_matches[0]}"
+                
+                # Look for specific file types mentioned
+                file_types = {
+                    'python': '*.py', 'javascript': '*.js', 'typescript': '*.ts',
+                    'html': '*.html', 'css': '*.css', 'java': '*.java',
+                    'c': '*.c', 'cpp': '*.cpp', 'csharp': '*.cs', 'c#': '*.cs',
+                    'go': '*.go', 'rust': '*.rs', 'ruby': '*.rb',
+                    'php': '*.php', 'swift': '*.swift', 'kotlin': '*.kt',
+                    'markdown': '*.md', 'json': '*.json', 'xml': '*.xml',
+                    'yaml': '*.yml', 'text': '*.txt', 'config': '*.config',
+                    'dockerfile': 'Dockerfile*', 'makefile': 'Makefile*'
+                }
+                
+                for file_type, pattern in file_types.items():
+                    if file_type in request_lower:
+                        return pattern
         
-        elif tool_name == 'fulltext_search':
-            if param_name == 'pattern':
+        elif tool_name in ['fulltext_search', 'FulltextSearch', 'search_text', 'grep']:
+            if param_name in ['pattern', 'search_pattern', 'query']:
                 # Extract potential search terms
                 # Look for quoted text first
                 quoted = re.findall(r'["\']([^"\']+)["\']', request)
@@ -1021,9 +1179,53 @@ class ToolManager:
                     return quoted[0]
                 
                 # Look for words after search-related terms
-                search_terms = re.findall(r'(?:search|find|look for|containing)\s+(\w+)', request_lower)
+                search_terms = re.findall(r'(?:search|find|look for|containing|matches|grep)\s+(\w+)', request_lower)
                 if search_terms:
                     return search_terms[0]
+                
+                # Look for words after "for"
+                for_terms = re.findall(r'for\s+["\']?([^"\'<>\n]{2,})["\']?', request_lower)
+                if for_terms:
+                    return for_terms[0].strip()
+            
+            elif param_name == 'path':
+                # Look for directory specifications
+                path_terms = re.findall(r'(?:in|from|within)\s+(?:directory|folder|dir)?\s*["\']?([^"\'<>\n]+)["\']?', request_lower)
+                if path_terms:
+                    return path_terms[0].strip()
+                
+                # Default to current directory if no path specified
+                return '.'
+        
+        elif tool_name in ['serena_shell_execution', 'ShellExecutionTool', 'execute_shell_command']:
+            if param_name == 'command':
+                # Try to extract a command from the request
+                command_prefixes = [
+                    'npm', 'pip', 'python', 'node', 'git', 'make', 'docker',
+                    'curl', 'wget', 'ls', 'cd', 'mkdir', 'cp', 'mv', 'rm',
+                    'find', 'grep', 'cat', 'touch', 'echo', 'ps', 'df', 'free'
+                ]
+                
+                words = request_lower.split()
+                for i, word in enumerate(words):
+                    if word in command_prefixes and i < len(words) - 1:
+                        # Extract the command and up to 5 arguments
+                        end_idx = min(i + 6, len(words))
+                        return ' '.join(words[i:end_idx])
+                
+                # Look for commands after specific keywords
+                command_patterns = [
+                    r'(?:run|execute)\s+(.+)',
+                    r'\$\s*(.+)',
+                    r'shell:\s*(.+)',
+                    r'bash:\s*(.+)',
+                    r'command:\s*(.+)'
+                ]
+                
+                for pattern in command_patterns:
+                    match = re.search(pattern, request, re.IGNORECASE)
+                    if match:
+                        return match.group(1).strip()
         
         # Default parameter inference based on common patterns
         return None

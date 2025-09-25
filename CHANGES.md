@@ -11,6 +11,11 @@ This update improves the handling of natural language requests in the interactiv
 - Improved confidence scoring for natural language requests
 - Added more patterns for detecting command-like structures in natural language
 - Made validation more lenient for natural language requests
+- Expanded command inference capabilities with more command mappings
+- Added better handling of quoted text in commands
+- Improved detection of command intent in conversational requests
+- Added more command prefixes for better command recognition
+- Enhanced the command extraction logic to handle a wider variety of natural language patterns
 
 ### 2. Tool Manager Improvements
 
@@ -19,6 +24,11 @@ This update improves the handling of natural language requests in the interactiv
 - Added special handling for Claude Code and Serena tools
 - Improved tool selection confidence thresholds for natural language commands
 - Added fallback mechanisms for when parameters can't be extracted
+- Enhanced parameter inference with more sophisticated pattern matching
+- Added tool-specific parameter inference logic
+- Improved handling of shell execution tools
+- Made validation more lenient for all tools with natural language input
+- Added better support for inferring file paths, patterns, and commands
 
 ### 3. Parameter Inference
 
@@ -26,6 +36,12 @@ This update improves the handling of natural language requests in the interactiv
 - Implemented pattern matching for common parameter types (file paths, directories, patterns, content)
 - Added tool-specific parameter inference logic
 - Improved error handling and logging for parameter extraction failures
+- Enhanced pattern matching with more sophisticated regex patterns
+- Added support for inferring commands from natural language
+- Improved file path and directory path extraction
+- Added better handling of quoted text for parameter extraction
+- Enhanced search pattern extraction for text search tools
+- Added support for inferring command parameters for shell execution tools
 
 ## How It Works
 
@@ -39,10 +55,18 @@ This update improves the handling of natural language requests in the interactiv
    - The tool now tries to extract commands from natural language descriptions
    - It can infer common commands based on intent and context
    - It provides helpful error messages when it can't determine the command
+   - It handles a wider variety of natural language patterns
+   - It's more lenient with command validation for natural language requests
 
 3. For Claude Code tools:
    - Parameter extraction is more forgiving
    - Missing parameters are inferred when possible
    - Tools are allowed to execute even with incomplete parameters
+
+4. For all tools:
+   - Parameter validation is more lenient for natural language requests
+   - Parameter inference is more sophisticated with better pattern matching
+   - Tool selection confidence is improved for natural language requests
+   - Error messages are more helpful when parameters can't be inferred
 
 These changes make the tools work properly with natural language requests in the interactive terminal, similar to how Codex and Claude Code work as coding assistants.
