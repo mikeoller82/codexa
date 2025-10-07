@@ -43,8 +43,11 @@ console = Console()
 class EnhancedCodexaAgent:
     """Enhanced Codexa agent with dynamic tool-based architecture."""
 
-    def __init__(self):
-        """Initialize the enhanced Codexa agent with tool-based architecture."""
+    def __init__(self, provider: Optional[Any] = None):
+        """
+        Initialize the enhanced Codexa agent with tool-based architecture.
+        Accepts an optional provider for testing purposes.
+        """
         # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger("codexa")
@@ -52,16 +55,21 @@ class EnhancedCodexaAgent:
         # Core configuration
         self.config = EnhancedConfig()
         
-        # Enhanced provider system
-        try:
-            self.provider_factory = EnhancedProviderFactory(self.config)
-            self.provider = self.provider_factory.get_provider()
-            
-            if not self.provider:
-                raise Exception("No AI provider available. Please configure your API keys.")
-        except Exception as e:
-            console.print(f"[red]Provider initialization failed: {e}[/red]")
-            raise
+        # Use provided provider or initialize a new one
+        if provider:
+            self.provider = provider
+            self.logger.info("Using provided AI provider for testing.")
+        else:
+            # Enhanced provider system
+            try:
+                self.provider_factory = EnhancedProviderFactory(self.config)
+                self.provider = self.provider_factory.get_provider()
+
+                if not self.provider:
+                    raise Exception("No AI provider available. Please configure your API keys.")
+            except Exception as e:
+                console.print(f"[red]Provider initialization failed: {e}[/red]")
+                raise
         
         # Project paths
         self.cwd = Path.cwd()
